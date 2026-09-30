@@ -1,6 +1,11 @@
 # Data Engine configuration — single source of truth for dataset generation.
 # Every reported dataset artifact must be reproducible from this file.
 
+gee:
+  # Google Earth Engine Cloud project ID (from console.cloud.google.com project picker).
+  # Each member can override with their own project ID if needed.
+  project_id: "nimble-furnace-451012-a2"
+
 aoi:
   name: kochi
   geojson: configs/aoi_kochi.geojson        # AOI polygon (draw / import in Phase 0)
