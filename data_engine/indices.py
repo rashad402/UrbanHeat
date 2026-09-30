@@ -10,7 +10,8 @@ numpy arrays AND ee.Image objects (Earth Engine overloads these operators). Keep
 consistent with models/constants.py (Kelvin internally; convert to degC only for display).
 """
 
-from .constants import KELVIN_0C
+# Celsius <-> Kelvin (kept local so data_engine has no dependency on the models package).
+KELVIN_0C = 273.15
 
 # Landsat Collection 2 Level 2 surface-temperature scaling (ST_B10 -> Kelvin).
 LANDSAT_ST_SCALE = 0.00341802
