@@ -32,12 +32,17 @@ model's `/whatif` API (see plan §11) — the inputs (per-ward NDVI, albedo, cli
 
 ## `simulator_live.html` — real satellite imagery + real 30 m LST
 
-The "real product" slice: a **satellite basemap** (Esri) with the **actual 30 m Landsat LST raster**
-overlaid (served live as Google Earth Engine tiles), and **click-anywhere queries** at an arbitrary
-radius (default 50 m) that return the real mean LST and a preview ΔT for exactly those pixels.
-This proves the model works at pixel/polygon granularity, not just wards.
+The "real product" slice: a **Sentinel-2 true-colour image** of Kochi with the **actual 30 m Landsat
+LST** blended on top, and **click-anywhere queries** at an arbitrary radius (default 50 m) that return
+the real mean LST and a preview ΔT for exactly those pixels. Proves the model works at pixel granularity.
 
-It needs the backend (GEE auth) and cannot be a published Artifact (that sandbox blocks external tiles):
+The scene is rendered **server-side by Earth Engine and embedded as data URIs** (single `<img>` each,
+no slippy-map library, no external tiles). This was a deliberate choice after WebGL/tile map libraries
+(MapLibre, Leaflet) failed to render reliably in constrained webviews — a static image always paints and
+the tab never hangs on tile requests. Trade-off: no pan/zoom (fixed city view). Click position maps
+linearly to lon/lat over the returned bounds.
+
+It needs the backend (GEE auth) and cannot be a published Artifact (that sandbox blocks external images):
 
 ```bash
 uvicorn api.live_demo:app --port 8000

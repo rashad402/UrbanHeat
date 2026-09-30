@@ -14,6 +14,9 @@ The ΔT here is still the first-order SEB stand-in (same as the ward simulator);
 Cannot be a published Artifact — that sandbox blocks external map tiles (satellite + GEE).
 """
 
+import base64
+import urllib.request
+
 import ee
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +35,12 @@ ROOF_SHARE, K_ET, CANOPY_BONUS = 0.5, 0.42, 1.35
 
 def _clamp(x, a, b):
     return max(a, min(b, x))
+
+
+def _fetch_b64(url):
+    """Download a GEE-rendered PNG and return it as a data: URI (self-contained, no external fetch)."""
+    data = urllib.request.urlopen(url, timeout=180).read()
+    return "data:image/png;base64," + base64.b64encode(data).decode()
 
 
 def seb_delta_t(lst_c, ndvi, albedo, s_down, cool, green, canopy):
@@ -66,21 +75,35 @@ def _startup():
 
     palette = ["313695", "4575b4", "74add1", "abd9e9", "fee090",
                "fdae61", "f46d43", "d73027", "a50026"]
-    mapid = lst_c.getMapId({"min": 28, "max": 46, "palette": palette})
-    S["tiles"] = mapid["tile_fetcher"].url_format
     S["lst_range"] = [28, 46]
     S["palette"] = ["#" + c for c in palette]
 
-    c = aoi.centroid(1).coordinates().getInfo()
-    S["center"] = {"lng": c[0], "lat": c[1]}
     b = aoi.bounds().coordinates().getInfo()[0]
-    S["bounds"] = [b[0][0], b[0][1], b[2][0], b[2][1]]
-    print(f"Startup done. LST tiles ready. center={S['center']}")
+    west, south, east, north = b[0][0], b[0][1], b[2][0], b[2][1]
+    S["bounds"] = [west, south, east, north]
+    region = ee.Geometry.Rectangle([west, south, east, north])
+    DIM = 1100
+
+    # Satellite base: Sentinel-2 true-colour median. Use a recent 2-year window — an
+    # 11-year median is too heavy for the thumbnail renderer (HTTP 400).
+    s2 = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+          .filterBounds(aoi).filterDate("2024-01-01", cfg["time"]["end"])
+          .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 15)).median())
+    sat_url = s2.getThumbURL({"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000,
+                              "region": region, "dimensions": DIM, "format": "png"})
+    # LST overlay, clipped to the city (outside = transparent).
+    lst_url = lst_c.clip(aoi).getThumbURL({"min": 28, "max": 46, "palette": palette,
+                                           "region": region, "dimensions": DIM, "format": "png"})
+    print("Rendering scene thumbnails from Earth Engine...")
+    S["sat_b64"] = _fetch_b64(sat_url)
+    S["lst_b64"] = _fetch_b64(lst_url)
+    print(f"Startup done. Scene ready. bounds={S['bounds']}")
 
 
-@app.get("/api/config")
-def config():
-    return {"tiles": S["tiles"], "center": S["center"], "bounds": S["bounds"],
+@app.get("/api/scene")
+def scene():
+    """Self-contained scene: satellite + LST as data: URIs (no external requests), plus bounds."""
+    return {"sat": S["sat_b64"], "lst": S["lst_b64"], "bounds": S["bounds"],
             "lst_range": S["lst_range"], "palette": S["palette"]}
 
 

@@ -4,8 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kochi Heat — Live</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
 <style>
 :root{--bg:#14110c;--panel:#201c16;--panel2:#1a1610;--fg:#efeae1;--muted:#a89f92;--border:#332d24;
@@ -22,8 +20,21 @@ header .place{color:var(--accent-ink)}
 header .sub{color:var(--muted);font-size:12px;margin-left:auto}
 .main{flex:1;display:grid;grid-template-columns:1fr 320px;min-height:0}
 @media(max-width:800px){.main{grid-template-columns:1fr}}
-#map{min-height:0;background:#0d1b2a;z-index:0}
-.leaflet-container{background:#0d1b2a;font-family:inherit}
+.stage{position:relative;overflow:auto;background:#0a0f16;display:grid;place-items:center;padding:14px}
+#scene{position:relative;max-width:100%;line-height:0;cursor:crosshair;box-shadow:0 6px 30px rgba(0,0,0,.5)}
+#scene img{display:block;max-width:100%;height:auto;-webkit-user-drag:none;user-select:none}
+#satimg{position:relative;z-index:0}
+#lstimg{position:absolute;inset:0;z-index:1;opacity:.72}
+#marker{position:absolute;z-index:2;width:14px;height:14px;border:2px solid var(--accent);border-radius:50%;
+  background:rgba(45,212,191,.28);transform:translate(-50%,-50%);pointer-events:none;display:none;
+  box-shadow:0 0 0 2px rgba(0,0,0,.4)}
+.overlay{position:absolute;inset:0;display:grid;place-items:center;background:var(--bg);z-index:5;
+  color:var(--muted);font-size:13px;padding:20px;text-align:center}
+.legend{position:absolute;left:20px;bottom:20px;z-index:3;background:rgba(20,17,12,.86);border:1px solid var(--border);
+  border-radius:9px;padding:8px 10px}
+.legend .t{font-size:11px;font-weight:600;margin-bottom:4px}
+.legend .bar{height:9px;width:170px;border-radius:3px}
+.legend .row{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:2px}
 .rail{border-left:1px solid var(--border);background:var(--panel2);padding:14px;overflow:auto;display:flex;flex-direction:column;gap:14px}
 @media(max-width:800px){.rail{border-left:0;border-top:1px solid var(--border);max-height:44vh}}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:13px}
@@ -39,44 +50,42 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .kpi .val{font-size:19px;font-weight:600;margin-top:2px}
 .kpi .val.cool{color:var(--cool)}
 .hint{color:var(--muted);font-size:12px;line-height:1.5}
-.legend{position:absolute;left:10px;bottom:22px;z-index:500;background:rgba(20,17,12,.86);border:1px solid var(--border);
-  border-radius:9px;padding:8px 10px}
-.legend .t{font-size:11px;font-weight:600;margin-bottom:4px}
-.legend .bar{height:9px;width:170px;border-radius:3px}
-.legend .row{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:2px}
-.opacity{position:absolute;right:10px;top:10px;z-index:500;background:rgba(20,17,12,.86);border:1px solid var(--border);
-  border-radius:9px;padding:8px 10px;font-size:11px;color:var(--muted)}
-.opacity input{width:120px;vertical-align:middle;accent-color:var(--accent)}
-.err{position:absolute;inset:0;display:grid;place-items:center;background:var(--bg);z-index:600;color:var(--muted);font-size:13px;padding:20px;text-align:center}
 footer{padding:7px 16px;border-top:1px solid var(--border);color:var(--muted);font-size:11px}
 a{color:var(--accent-ink)}
-.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel);color:var(--fg)}
 </style>
 </head>
 <body>
 <header>
   <h1>Kochi urban heat &mdash; <span class="place">live</span></h1>
   <span class="badge">real imagery &middot; preview ΔT</span>
-  <span class="sub">Click anywhere to sample real 30&nbsp;m Landsat LST and estimate cooling.</span>
+  <span class="sub">Click anywhere on the city to sample real 30&nbsp;m Landsat LST.</span>
 </header>
 
 <div class="main">
-  <div id="map">
-    <div class="err" id="err" hidden></div>
-    <div class="opacity">LST overlay
-      <input type="range" id="op" min="0" max="1" step="0.05" value="0.7"></div>
-    <div class="legend">
-      <div class="t">Land surface temp (&deg;C)</div>
-      <div class="bar" id="legbar"></div>
-      <div class="row"><span id="leglo">28</span><span id="leghi">46</span></div>
+  <div class="stage">
+    <div id="scene">
+      <img id="satimg" alt="Sentinel-2 satellite imagery of Kochi">
+      <img id="lstimg" alt="Landsat land surface temperature overlay">
+      <div id="marker"></div>
+      <div class="legend">
+        <div class="t">Land surface temp (&deg;C)</div>
+        <div class="bar" id="legbar"></div>
+        <div class="row"><span id="leglo">28</span><span id="leghi">46</span></div>
+      </div>
     </div>
+    <div class="overlay" id="overlay">Rendering real Landsat &amp; Sentinel-2 imagery from Earth Engine&hellip;</div>
   </div>
 
   <div class="rail">
     <div class="card">
-      <h2>Query area</h2>
+      <h2>Display</h2>
       <div class="ctrl">
-        <div class="h"><span>Radius</span><span class="v" id="vrad">50 m</span></div>
+        <div class="h"><span>LST overlay</span><span class="v" id="vop">72%</span></div>
+        <div class="d">Blend the thermal layer over the satellite image.</div>
+        <input type="range" id="op" min="0" max="1" step="0.05" value="0.72">
+      </div>
+      <div class="ctrl">
+        <div class="h"><span>Sample radius</span><span class="v" id="vrad">50 m</span></div>
         <div class="d">Circle sampled on each click (30 m = one Landsat pixel).</div>
         <input type="range" id="rad" min="30" max="300" step="10" value="50">
       </div>
@@ -92,7 +101,7 @@ a{color:var(--accent-ink)}
     </div>
     <div class="card">
       <h2 id="resTitle">Sampled point</h2>
-      <div id="resBody" class="hint">Click on the map to sample a location.</div>
+      <div id="resBody" class="hint">Click on the city to sample a location.</div>
       <div class="kpis" id="kpis" hidden>
         <div class="kpi"><div class="k">Baseline LST</div><div class="val mono" id="kBase">&ndash;</div></div>
         <div class="kpi"><div class="k">After</div><div class="val mono" id="kAfter">&ndash;</div></div>
@@ -102,51 +111,50 @@ a{color:var(--accent-ink)}
     </div>
   </div>
 </div>
-<footer>Basemap © Esri World Imagery · LST © USGS/NASA Landsat via Google Earth Engine · Wards © OpenCity/DataMeet. ΔT is the first-order SEB preview (not the trained PINN).</footer>
+<footer>Imagery © Sentinel-2 (ESA) true-colour · LST © USGS/NASA Landsat, both via Google Earth Engine · Wards © OpenCity/DataMeet. ΔT is the first-order SEB preview (not the trained PINN).</footer>
 
-<script src="ward_data.js"></script>
 <script>
 (async function(){
   const $=id=>document.getElementById(id);
-  const fail=m=>{$('err').hidden=false;$('err').textContent=m;};
-  if(!window.L){return fail('Leaflet failed to load (check your internet connection).');}
-
-  let CFG;
-  try{ CFG=await (await fetch('/api/config')).json(); }
+  const fail=m=>{$('overlay').textContent=m;};
+  let SCENE;
+  try{ SCENE=await (await fetch('/api/scene')).json(); }
   catch(e){ return fail('Could not reach the backend. Start it with:  uvicorn api.live_demo:app --port 8000'); }
 
-  const map=L.map('map',{center:[CFG.center.lat,CFG.center.lng],zoom:12,zoomControl:true,attributionControl:false});
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    {maxZoom:19}).addTo(map);
-  const lstLayer=L.tileLayer(CFG.tiles,{opacity:0.7,maxZoom:19}).addTo(map);
-  if(window.WARD_DATA){
-    L.geoJSON(window.WARD_DATA,{style:{color:'#ffffff',weight:0.7,opacity:0.25,fill:false}}).addTo(map);
-  }
-  if(CFG.bounds){map.fitBounds([[CFG.bounds[1],CFG.bounds[0]],[CFG.bounds[3],CFG.bounds[2]]]);}
+  const [W,S_,E,N]=SCENE.bounds;
+  $('satimg').src=SCENE.sat;
+  $('lstimg').src=SCENE.lst;
+  $('legbar').style.background='linear-gradient(90deg,'+SCENE.palette.join(',')+')';
+  $('leglo').textContent=SCENE.lst_range[0]; $('leghi').textContent=SCENE.lst_range[1];
 
-  // legend
-  $('legbar').style.background='linear-gradient(90deg,'+CFG.palette.join(',')+')';
-  $('leglo').textContent=CFG.lst_range[0]; $('leghi').textContent=CFG.lst_range[1];
-  $('op').oninput=e=>lstLayer.setOpacity(+e.target.value);
+  let ready=0; const done=()=>{if(++ready>=2)$('overlay').hidden=true;};
+  $('satimg').onload=done; $('lstimg').onload=done;
+  $('satimg').onerror=()=>fail('Satellite image failed to render.');
+  $('lstimg').onerror=()=>fail('LST image failed to render.');
 
   const ctrl={rad:50,cool:0.15,green:0,canopy:0};
+  $('op').oninput=e=>{$('lstimg').style.opacity=e.target.value;$('vop').textContent=Math.round(e.target.value*100)+'%';};
   $('rad').oninput=()=>{ctrl.rad=+$('rad').value;$('vrad').textContent=ctrl.rad+' m';requery();};
   const bind=(id,fmt)=>{$(id).oninput=()=>{ctrl[id]=+$(id).value;$('v'+id).textContent=fmt(+$(id).value);requery();};};
   bind('cool',v=>v>0.155?'α → '+v.toFixed(2):'off');
   bind('green',v=>v>0?'+'+v.toFixed(2):'off');
   bind('canopy',v=>v>0?'+'+v.toFixed(2):'off');
 
-  let last=null, ring=null;
-  map.on('click',e=>{last={lng:e.latlng.lng,lat:e.latlng.lat};requery();});
+  let last=null;
+  $('scene').addEventListener('click',ev=>{
+    const r=$('scene').getBoundingClientRect();
+    const fx=(ev.clientX-r.left)/r.width, fy=(ev.clientY-r.top)/r.height;
+    last={lng:W+fx*(E-W), lat:N-fy*(N-S_), fx, fy};
+    const mk=$('marker'); mk.style.left=(fx*100)+'%'; mk.style.top=(fy*100)+'%'; mk.style.display='block';
+    requery();
+  });
 
   async function requery(){
     if(!last)return;
-    if(ring)map.removeLayer(ring);
-    ring=L.circle([last.lat,last.lng],{radius:ctrl.rad,color:'#2dd4bf',weight:2,fillColor:'#2dd4bf',fillOpacity:0.18}).addTo(map);
     $('resTitle').textContent='Sampling…';
     try{
       const r=await (await fetch('/api/query',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({...last,radius:ctrl.rad,cool:ctrl.cool,green:ctrl.green,canopy:ctrl.canopy})})).json();
+        body:JSON.stringify({lng:last.lng,lat:last.lat,radius:ctrl.rad,cool:ctrl.cool,green:ctrl.green,canopy:ctrl.canopy})})).json();
       if(!r.ok){$('resTitle').textContent='Sampled point';$('resBody').hidden=false;$('resBody').textContent=r.reason;$('kpis').hidden=true;return;}
       $('resTitle').textContent=ctrl.rad+' m circle · '+r.npix+' pixels · '+r.area_m2.toLocaleString()+' m²';
       $('resBody').hidden=true; $('kpis').hidden=false;
@@ -156,8 +164,6 @@ a{color:var(--accent-ink)}
       $('kBuilt').textContent=Math.round(r.built_frac*100)+'%';
     }catch(err){$('resTitle').textContent='Sampled point';$('resBody').hidden=false;$('resBody').textContent='Query failed: '+err;}
   }
-  // keep Leaflet sized correctly after layout settles
-  setTimeout(()=>map.invalidateSize(),300);
 })();
 </script>
 </body>
