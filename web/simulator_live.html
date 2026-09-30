@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kochi Heat — Live</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+:root{--bg:#14110c;--panel:#201c16;--panel2:#1a1610;--fg:#efeae1;--muted:#a89f92;--border:#332d24;
+  --accent:#2dd4bf;--accent-ink:#7ff0e3;--cool:#4bd6a3;--hot:#f0685f;--warn:#e0a94f}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:"IBM Plex Sans",system-ui,sans-serif;display:flex;flex-direction:column}
+.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+h1{font-family:"Archivo",sans-serif;font-size:16px;margin:0;font-weight:700}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+header .place{color:var(--accent-ink)}
+.badge{font-size:10.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--warn);
+  border:1px solid #6b531f;background:#2a2110;padding:3px 8px;border-radius:999px}
+header .sub{color:var(--muted);font-size:12px;margin-left:auto}
+.main{flex:1;display:grid;grid-template-columns:1fr 320px;min-height:0}
+@media(max-width:800px){.main{grid-template-columns:1fr}}
+#map{position:relative;min-height:0}
+.rail{border-left:1px solid var(--border);background:var(--panel2);padding:14px;overflow:auto;display:flex;flex-direction:column;gap:14px}
+@media(max-width:800px){.rail{border-left:0;border-top:1px solid var(--border);max-height:44vh}}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:13px}
+.card h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 10px}
+.ctrl{margin-top:12px}.ctrl:first-child{margin-top:0}
+.ctrl .h{display:flex;justify-content:space-between;font-size:13px;font-weight:600}
+.ctrl .v{color:var(--accent-ink)}
+.ctrl .d{color:var(--muted);font-size:11px;margin:1px 0 6px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kpi{background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:9px}
+.kpi .k{font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:600}
+.kpi .val{font-size:19px;font-weight:600;margin-top:2px}
+.kpi .val.cool{color:var(--cool)}
+.hint{color:var(--muted);font-size:12px;line-height:1.5}
+.legend{position:absolute;left:10px;bottom:24px;z-index:2;background:rgba(20,17,12,.82);border:1px solid var(--border);
+  border-radius:9px;padding:8px 10px;backdrop-filter:blur(3px)}
+.legend .t{font-size:11px;font-weight:600;margin-bottom:4px}
+.legend .bar{height:9px;width:170px;border-radius:3px}
+.legend .row{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:2px}
+.opacity{position:absolute;right:10px;top:10px;z-index:2;background:rgba(20,17,12,.82);border:1px solid var(--border);
+  border-radius:9px;padding:8px 10px;font-size:11px;color:var(--muted)}
+.opacity input{width:120px;vertical-align:middle;accent-color:var(--accent)}
+.loading{position:absolute;inset:0;display:grid;place-items:center;background:var(--bg);z-index:5;color:var(--muted);font-size:13px}
+.maplibregl-popup-content{background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:9px;font-family:inherit}
+.maplibregl-popup-tip{border-top-color:var(--panel)!important;border-bottom-color:var(--panel)!important}
+footer{padding:7px 16px;border-top:1px solid var(--border);color:var(--muted);font-size:11px}
+a{color:var(--accent-ink)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Kochi urban heat &mdash; <span class="place">live</span></h1>
+  <span class="badge" title="Real Landsat data; ΔT is the SEB preview model.">real imagery &middot; preview ΔT</span>
+  <span class="sub">Click anywhere to sample real 30&nbsp;m Landsat LST and estimate cooling.</span>
+</header>
+
+<div class="main">
+  <div id="map">
+    <div class="loading" id="loading">Loading real Landsat LST from Earth Engine&hellip;</div>
+    <div class="opacity">LST overlay
+      <input type="range" id="op" min="0" max="1" step="0.05" value="0.7"></div>
+    <div class="legend">
+      <div class="t">Land surface temp (&deg;C)</div>
+      <div class="bar" id="legbar"></div>
+      <div class="row"><span id="leglo">28</span><span id="leghi">46</span></div>
+    </div>
+  </div>
+
+  <div class="rail">
+    <div class="card">
+      <h2>Query area</h2>
+      <div class="ctrl">
+        <div class="h"><span>Radius</span><span class="v" id="vrad">50 m</span></div>
+        <div class="d">Size of the circle sampled on each click (30 m = one Landsat pixel).</div>
+        <input type="range" id="rad" min="30" max="300" step="10" value="50">
+      </div>
+    </div>
+    <div class="card">
+      <h2>Intervention</h2>
+      <div class="ctrl">
+        <div class="h"><span>Cool roof</span><span class="v" id="vcool">off</span></div>
+        <div class="d">Raise albedo.</div>
+        <input type="range" id="cool" min="0.15" max="0.60" step="0.01" value="0.15">
+      </div>
+      <div class="ctrl">
+        <div class="h"><span>Urban greening</span><span class="v" id="vgreen">off</span></div>
+        <div class="d">Add vegetation (NDVI).</div>
+        <input type="range" id="green" min="0" max="0.40" step="0.01" value="0">
+      </div>
+      <div class="ctrl">
+        <div class="h"><span>Tree canopy</span><span class="v" id="vcanopy">off</span></div>
+        <div class="d">Greening + shading.</div>
+        <input type="range" id="canopy" min="0" max="0.30" step="0.01" value="0">
+      </div>
+    </div>
+    <div class="card">
+      <h2 id="resTitle">Sampled point</h2>
+      <div id="resBody" class="hint">Click on the map to sample a location.</div>
+      <div class="kpis" id="kpis" hidden>
+        <div class="kpi"><div class="k">Baseline LST</div><div class="val mono" id="kBase">&ndash;</div></div>
+        <div class="kpi"><div class="k">After</div><div class="val mono" id="kAfter">&ndash;</div></div>
+        <div class="kpi"><div class="k">Cooling ΔT</div><div class="val mono cool" id="kDelta">&ndash;</div></div>
+        <div class="kpi"><div class="k">Built-up</div><div class="val mono" id="kBuilt">&ndash;</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<footer>Basemap © Esri World Imagery · LST © USGS/NASA Landsat via Google Earth Engine · Wards © OpenCity/DataMeet. ΔT is the first-order SEB preview (not the trained PINN).</footer>
+
+<script src="ward_data.js"></script>
+<script>
+(async function(){
+  const $=id=>document.getElementById(id);
+  let CFG;
+  try{ CFG=await (await fetch('/api/config')).json(); }
+  catch(e){ $('loading').textContent='Could not reach the backend. Start it with:  uvicorn api.live_demo:app --port 8000'; return; }
+
+  const map=new maplibregl.Map({container:'map',dragRotate:false,attributionControl:false,
+    center:[CFG.center.lng,CFG.center.lat],zoom:11.5,
+    style:{version:8,sources:{
+      sat:{type:'raster',tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],tileSize:256,attribution:'Esri'},
+      lst:{type:'raster',tiles:[CFG.tiles],tileSize:256}
+    },layers:[
+      {id:'sat',type:'raster',source:'sat'},
+      {id:'lst',type:'raster',source:'lst',paint:{'raster-opacity':0.7}}
+    ]}});
+  map.on('error',ev=>console.error('Map error:',ev&&ev.error&&ev.error.message));
+  map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-left');
+
+  // legend gradient
+  $('legbar').style.background='linear-gradient(90deg,'+CFG.palette.join(',')+')';
+  $('leglo').textContent=CFG.lst_range[0]; $('leghi').textContent=CFG.lst_range[1];
+
+  map.on('load',()=>{
+    $('loading').hidden=true;
+    // ward outlines for context (optional data file)
+    if(window.WARD_DATA){
+      map.addSource('wards',{type:'geojson',data:window.WARD_DATA});
+      map.addLayer({id:'wl',type:'line',source:'wards',paint:{'line-color':'#ffffff','line-opacity':0.25,'line-width':0.6}});
+    }
+    map.addSource('pick',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+    map.addLayer({id:'pickfill',type:'fill',source:'pick',paint:{'fill-color':'#2dd4bf','fill-opacity':0.18}});
+    map.addLayer({id:'pickline',type:'line',source:'pick',paint:{'line-color':'#2dd4bf','line-width':2}});
+  });
+
+  $('op').oninput=e=>map.getLayer('lst')&&map.setPaintProperty('lst','raster-opacity',+e.target.value);
+
+  const ctrl={rad:50,cool:0.15,green:0,canopy:0};
+  const bind=(id,key,fmt)=>{const el=$(id);el.oninput=()=>{ctrl[key]=+el.value;$('v'+key).textContent=fmt(+el.value);requery();};};
+  $('rad').oninput=()=>{ctrl.rad=+$('rad').value;$('vrad').textContent=ctrl.rad+' m';requery();};
+  bind('cool','cool',v=>v>0.155?'α → '+v.toFixed(2):'off');
+  bind('green','green',v=>v>0?'+'+v.toFixed(2):'off');
+  bind('canopy','canopy',v=>v>0?'+'+v.toFixed(2):'off');
+
+  let last=null;
+  function circle(lng,lat,r){const pts=[],d=r/111320;
+    for(let i=0;i<=48;i++){const a=i/48*2*Math.PI;pts.push([lng+d*Math.cos(a)/Math.cos(lat*Math.PI/180),lat+d*Math.sin(a)]);}
+    return{type:'FeatureCollection',features:[{type:'Feature',geometry:{type:'Polygon',coordinates:[pts]}}]};}
+
+  map.on('click',e=>{last={lng:e.lngLat.lng,lat:e.lngLat.lat};requery();});
+  map.on('mousemove',()=>map.getCanvas().style.cursor='crosshair');
+
+  async function requery(){
+    if(!last)return;
+    map.getSource('pick').setData(circle(last.lng,last.lat,ctrl.rad));
+    $('resTitle').textContent='Sampling…';
+    try{
+      const r=await (await fetch('/api/query',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({...last,radius:ctrl.rad,cool:ctrl.cool,green:ctrl.green,canopy:ctrl.canopy})})).json();
+      if(!r.ok){$('resTitle').textContent='Sampled point';$('resBody').hidden=false;$('resBody').textContent=r.reason;$('kpis').hidden=true;return;}
+      $('resTitle').textContent=ctrl.rad+' m circle · '+r.npix+' pixels · '+r.area_m2.toLocaleString()+' m²';
+      $('resBody').hidden=true; $('kpis').hidden=false;
+      $('kBase').textContent=r.lst_c.toFixed(1)+'°C';
+      $('kAfter').textContent=r.after_c.toFixed(1)+'°C';
+      $('kDelta').textContent=(r.delta_t<=-0.05?r.delta_t.toFixed(1):'0.0')+'°C';
+      $('kBuilt').textContent=Math.round(r.built_frac*100)+'%';
+    }catch(err){$('resTitle').textContent='Sampled point';$('resBody').hidden=false;$('resBody').textContent='Query failed: '+err;}
+  }
+})();
+</script>
+</body>
+</html>

@@ -30,6 +30,24 @@ the ward's built-up share and the restoring term `4εσT³ + ρcp/r_ah`, clamped
 ranges. **Swap in the PINN** by replacing `deltaT()` in `simulator.html` with a call to the trained
 model's `/whatif` API (see plan §11) — the inputs (per-ward NDVI, albedo, climate) are the same.
 
+## `simulator_live.html` — real satellite imagery + real 30 m LST
+
+The "real product" slice: a **satellite basemap** (Esri) with the **actual 30 m Landsat LST raster**
+overlaid (served live as Google Earth Engine tiles), and **click-anywhere queries** at an arbitrary
+radius (default 50 m) that return the real mean LST and a preview ΔT for exactly those pixels.
+This proves the model works at pixel/polygon granularity, not just wards.
+
+It needs the backend (GEE auth) and cannot be a published Artifact (that sandbox blocks external tiles):
+
+```bash
+uvicorn api.live_demo:app --port 8000
+# then open http://localhost:8000/simulator_live.html
+```
+
+`api/live_demo.py` builds a dry-season median composite, serves its LST as tiles (`/api/config`),
+and answers point/area queries (`/api/query`) by sampling GEE over a buffer and applying the same
+SEB preview. Replace `seb_delta_t` with the trained PINN when ready.
+
 ## Later: Next.js + Mapbox port (optional)
 
 If a richer app is wanted (routing, auth, Mapbox basemaps), port `simulator.html` into a Next.js app:
