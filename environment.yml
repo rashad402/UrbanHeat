@@ -1,0 +1,33 @@
+name: urbanheat
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  # Geospatial / remote sensing
+  - rasterio
+  - geopandas
+  - xarray
+  - netcdf4
+  - shapely
+  - pyproj
+  # Data
+  - numpy
+  - pandas
+  - pyarrow            # parquet
+  - scipy
+  # Classical ML baselines
+  - scikit-learn
+  - xgboost
+  # Deep learning (install torch via pip for correct CUDA/CPU wheel)
+  - matplotlib
+  - pyyaml
+  - tqdm
+  - pip:
+      - earthengine-api
+      - geemap
+      - torch            # pick the CUDA/CPU build appropriate to your machine
+      - deepxde          # optional; pure-PyTorch loss is the default (see plan §9)
+      - fastapi
+      - uvicorn[standard]
+      - wandb            # optional experiment logging

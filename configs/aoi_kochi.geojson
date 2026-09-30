@@ -1,0 +1,22 @@
+{
+  "type": "FeatureCollection",
+  "note": "PLACEHOLDER AOI — replace with the real Kochi bounding polygon (Phase 0). Coordinates below are a rough bounding box around Kochi and MUST be refined.",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "kochi_aoi_placeholder" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [76.20, 9.90],
+            [76.40, 9.90],
+            [76.40, 10.10],
+            [76.20, 10.10],
+            [76.20, 9.90]
+          ]
+        ]
+      }
+    }
+  ]
+}

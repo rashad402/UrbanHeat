@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+env/
+.ipynb_checkpoints/
+*.egg-info/
+
+# Data & model artifacts (never commit large binaries)
+data/
+*.tif
+*.tiff
+*.nc
+*.npz
+*.parquet
+models/checkpoints/
+*.pt
+*.pth
+scaler.json
+
+# Node / Next.js
+node_modules/
+web/.next/
+web/out/
+web/build/
+.env
+.env.local
+
+# Secrets & credentials
+*.key
+.earthengine/
+service-account*.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs & experiments
+wandb/
+mlruns/
+*.log

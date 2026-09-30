@@ -1,0 +1,56 @@
+# Data Engine configuration — single source of truth for dataset generation.
+# Every reported dataset artifact must be reproducible from this file.
+
+aoi:
+  name: kochi
+  geojson: configs/aoi_kochi.geojson        # AOI polygon (draw / import in Phase 0)
+  wards_geojson: configs/wards_kochi.geojson # ward boundaries (source in Phase 0)
+  crs: "EPSG:32643"                          # UTM 43N (Kerala) for metric grids
+
+time:
+  start: "2015-01-01"
+  end:   "2026-06-30"
+  # Primary training window = dry season (fewer clouds). Monsoon filled from MODIS.
+  dry_season_months: [12, 1, 2, 3, 4]
+
+satellite:
+  landsat:
+    collection: "LANDSAT/LC08/C02/T1_L2"     # Collection 2 L2 (surface temp product ST_B10)
+    also: "LANDSAT/LC09/C02/T1_L2"
+    lst_band: "ST_B10"                        # scaled surface temperature
+    qa_band: "QA_PIXEL"
+    cloud_pct_max: 20
+  sentinel2:
+    collection: "COPERNICUS/S2_SR_HARMONIZED"
+    scl_band: "SCL"
+    cloud_pct_max: 20
+  modis:
+    collection: "MODIS/061/MOD11A2"           # 8-day LST for gap-filling
+    lst_band: "LST_Day_1km"
+
+climate:
+  era5_collection: "ECMWF/ERA5_LAND/HOURLY"
+  variables:
+    t_air: "temperature_2m"
+    dewpoint: "dewpoint_temperature_2m"       # used to derive RH
+    u10: "u_component_of_wind_10m"
+    v10: "v_component_of_wind_10m"
+    s_down: "surface_solar_radiation_downwards"
+
+grid:
+  resolution_m: 30
+
+sampling:
+  target_rows: 150000
+  strategy: "stratified_by_ward_and_date"
+
+split:
+  policy: "spatial_block"                     # NOT random pixel split (avoids leakage)
+  test_fraction: 0.2
+  val_fraction: 0.1
+
+seed: 42
+
+output:
+  processed_dir: "data/processed"
+  samples_file: "data/processed/kochi_samples.parquet"
