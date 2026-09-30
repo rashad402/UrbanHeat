@@ -1,0 +1,386 @@
+<meta charset="utf-8">
+<title>Kochi Heat Simulator</title>
+<meta name="description" content="Ward-level what-if urban heat mitigation planner for Kochi — cool roofs, greening, tree canopy.">
+<style>
+/* Layout: full-bleed map with a docked control rail; stacks to one column on phones. */
+:root{
+  --bg:#f4f1ec; --panel:#ffffff; --panel-2:#faf8f4; --fg:#1b1915; --muted:#6d665c;
+  --border:#e5ded4; --line:#d3ccc0; --accent:#0f766e; --accent-ink:#0b544e;
+  --hot:#c02a26; --cool:#1f7a5a; --warn:#b45309;
+  --shadow:0 1px 2px rgba(30,25,15,.06),0 8px 24px rgba(30,25,15,.06);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#14110c; --panel:#201c16; --panel-2:#1a1610; --fg:#efeae1; --muted:#a89f92;
+  --border:#332d24; --line:#3d362b; --accent:#2dd4bf; --accent-ink:#7ff0e3;
+  --hot:#f0685f; --cool:#4bd6a3; --warn:#e0a94f;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#14110c; --panel:#201c16; --panel-2:#1a1610; --fg:#efeae1; --muted:#a89f92;
+  --border:#332d24; --line:#3d362b; --accent:#2dd4bf; --accent-ink:#7ff0e3;
+  --hot:#f0685f; --cool:#4bd6a3; --warn:#e0a94f;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.45}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+h1,h2,h3{margin:0;font-family:"Archivo",system-ui,sans-serif;text-wrap:balance}
+
+/* ---- app shell ---- */
+.wrap{max-width:1240px;margin:0 auto;padding-inline:16px;padding-block:18px 28px}
+header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin-bottom:14px}
+header.top h1{font-size:clamp(20px,3vw,27px);letter-spacing:-.01em;font-weight:700}
+header.top .place{color:var(--accent-ink);font-weight:700}
+header.top p{margin:0;color:var(--muted);font-size:13.5px;flex-basis:100%;max-width:70ch}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;letter-spacing:.03em;
+  text-transform:uppercase;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);
+  background:color-mix(in srgb,var(--warn) 12%,transparent);padding:3px 9px;border-radius:999px}
+
+.grid{display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start}
+@media(max-width:820px){.grid{grid-template-columns:1fr}}
+
+/* ---- map ---- */
+.mapcard{position:relative;border:1px solid var(--border);border-radius:14px;overflow:hidden;
+  box-shadow:var(--shadow);background:var(--panel-2)}
+#map{position:absolute;inset:0}
+.mapcard{height:clamp(380px,64vh,760px)}
+@media(max-width:820px){.mapcard{height:56vh;min-height:340px}}
+.maplibregl-map{position:relative;overflow:hidden}
+.maplibregl-canvas-container,.maplibregl-canvas{position:absolute;top:0;left:0}
+.maplibregl-canvas-container.maplibregl-interactive{cursor:grab}
+.maplibregl-canvas-container.maplibregl-interactive:active{cursor:grabbing}
+
+.zoombar{position:absolute;left:12px;top:12px;z-index:5;display:flex;flex-direction:column;gap:0;
+  border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
+.zoombar button{width:34px;height:34px;border:0;background:var(--panel);color:var(--fg);font-size:19px;
+  cursor:pointer;display:grid;place-items:center;font-family:inherit}
+.zoombar button+button{border-top:1px solid var(--border)}
+.zoombar button:hover{background:var(--panel-2)}
+
+.viewtabs{position:absolute;right:12px;top:12px;z-index:5;display:flex;background:var(--panel);
+  border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px;box-shadow:var(--shadow)}
+.viewtabs button{border:0;background:none;color:var(--muted);font:600 12px/1 "IBM Plex Sans",sans-serif;
+  padding:7px 10px;border-radius:7px;cursor:pointer}
+.viewtabs button[aria-pressed="true"]{background:var(--accent);color:#fff}
+:root[data-theme="dark"] .viewtabs button[aria-pressed="true"],
+:root:not([data-theme="light"]) .viewtabs button[aria-pressed="true"]{color:#08201d}
+
+.legend{position:absolute;left:12px;bottom:12px;z-index:5;background:color-mix(in srgb,var(--panel) 92%,transparent);
+  border:1px solid var(--border);border-radius:10px;padding:9px 11px;box-shadow:var(--shadow);backdrop-filter:blur(4px)}
+.legend .lbar{height:9px;width:190px;border-radius:3px;margin:5px 0 3px}
+.legend .lrow{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted)}
+.legend .ltitle{font-size:11px;font-weight:600;letter-spacing:.02em}
+.attrib{position:absolute;right:8px;bottom:6px;z-index:4;font-size:10px;color:var(--muted);
+  background:color-mix(in srgb,var(--panel) 70%,transparent);padding:1px 6px;border-radius:5px}
+
+/* ---- control rail ---- */
+.rail{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;box-shadow:var(--shadow)}
+.card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin-bottom:10px}
+.scope{display:flex;gap:6px;margin-bottom:2px}
+.scope label{flex:1;text-align:center;font-size:12.5px;font-weight:600;padding:7px;border:1px solid var(--border);
+  border-radius:8px;cursor:pointer;color:var(--muted)}
+.scope input{position:absolute;opacity:0;pointer-events:none}
+.scope input:checked+span{color:var(--fg)}
+.scope label:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--fg)}
+
+.ctrl{margin-top:14px}
+.ctrl:first-of-type{margin-top:4px}
+.ctrl .head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.ctrl .name{font-weight:600;font-size:13.5px}
+.ctrl .val{font-size:12.5px;color:var(--accent-ink);font-weight:600}
+.ctrl .desc{color:var(--muted);font-size:11.5px;margin:2px 0 7px}
+input[type=range]{width:100%;accent-color:var(--accent);height:22px}
+.reset{margin-top:14px;width:100%;border:1px solid var(--border);background:var(--panel-2);color:var(--fg);
+  font:600 13px/1 "IBM Plex Sans",sans-serif;padding:9px;border-radius:9px;cursor:pointer}
+.reset:hover{border-color:var(--line)}
+
+.sel .selname{font-weight:700;font-size:15px;font-family:"Archivo",sans-serif}
+.sel .selmeta{color:var(--muted);font-size:12px;margin-top:1px}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:11px}
+.kpi{background:var(--panel-2);border:1px solid var(--border);border-radius:9px;padding:9px 10px}
+.kpi .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
+.kpi .v{font-size:20px;font-weight:600;margin-top:2px}
+.kpi .v.big{font-family:"IBM Plex Mono",monospace}
+.kpi .v.cool{color:var(--cool)}
+.kpi .v.hot{color:var(--hot)}
+.hint{color:var(--muted);font-size:12px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+footer{margin-top:18px;color:var(--muted);font-size:11.5px;line-height:1.6;max-width:95ch}
+footer b{color:var(--fg);font-weight:600}
+a{color:var(--accent-ink)}
+</style>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+
+<div class="wrap">
+  <header class="top">
+    <h1>Urban heat what-if&nbsp;— <span class="place">Kochi</span></h1>
+    <span class="badge" title="This preview uses a first-order surface energy balance estimate, not the trained PINN.">▲ Preview model</span>
+    <p>Baseline land surface temperature is measured from Landsat (2015–2026). Apply cool roofs, greening
+       or tree canopy to a ward and see the estimated cooling (ΔT). Numbers update instantly.</p>
+  </header>
+
+  <div class="grid">
+    <div class="mapcard">
+      <div id="map"></div>
+      <div class="zoombar">
+        <button id="zin" aria-label="Zoom in">+</button>
+        <button id="zout" aria-label="Zoom out">−</button>
+      </div>
+      <div class="viewtabs" role="group" aria-label="Map view">
+        <button data-view="base" aria-pressed="true">Baseline LST</button>
+        <button data-view="after" aria-pressed="false">After</button>
+        <button data-view="delta" aria-pressed="false">Cooling ΔT</button>
+      </div>
+      <div class="legend">
+        <div class="ltitle" id="legTitle">Baseline LST</div>
+        <div class="lbar" id="legBar"></div>
+        <div class="lrow"><span id="legLo">–</span><span id="legHi">–</span></div>
+      </div>
+      <div class="attrib">Wards © OpenStreetMap / OpenCity · DataMeet (ODbL)</div>
+    </div>
+
+    <div class="rail">
+      <div class="card">
+        <h2>Apply to</h2>
+        <div class="scope">
+          <label><input type="radio" name="scope" value="selected" checked><span>Selected ward</span></label>
+          <label><input type="radio" name="scope" value="all"><span>All wards</span></label>
+        </div>
+
+        <div class="ctrl">
+          <div class="head"><span class="name">Cool roof</span><span class="val" id="vCool">off</span></div>
+          <div class="desc">Raise roof albedo (reflectivity). Higher = more sunlight bounced away.</div>
+          <input type="range" id="cool" min="0.15" max="0.60" step="0.01" value="0.15">
+        </div>
+
+        <div class="ctrl">
+          <div class="head"><span class="name">Urban greening</span><span class="val" id="vGreen">off</span></div>
+          <div class="desc">Add vegetation (NDVI) on built/bare surfaces — evaporative cooling.</div>
+          <input type="range" id="green" min="0" max="0.40" step="0.01" value="0">
+        </div>
+
+        <div class="ctrl">
+          <div class="head"><span class="name">Tree canopy</span><span class="val" id="vCanopy">off</span></div>
+          <div class="desc">Shade trees: greening plus a shading bonus.</div>
+          <input type="range" id="canopy" min="0" max="0.30" step="0.01" value="0">
+        </div>
+
+        <button class="reset" id="reset">Reset interventions</button>
+      </div>
+
+      <div class="card sel">
+        <div class="selname" id="selName">No ward selected</div>
+        <div class="selmeta" id="selMeta">Click a ward on the map to select it.</div>
+        <div class="kpis">
+          <div class="kpi"><div class="k">Baseline LST</div><div class="v big" id="kBase">–</div></div>
+          <div class="kpi"><div class="k">After</div><div class="v big" id="kAfter">–</div></div>
+          <div class="kpi"><div class="k">Cooling ΔT</div><div class="v big cool" id="kDelta">–</div></div>
+          <div class="kpi"><div class="k">Built-up share</div><div class="v big" id="kBuilt">–</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>City summary</h2>
+        <div class="kpis" style="grid-template-columns:1fr 1fr">
+          <div class="kpi"><div class="k">Mean baseline</div><div class="v big" id="sBase">–</div></div>
+          <div class="kpi"><div class="k">Mean cooling</div><div class="v big cool" id="sDelta">–</div></div>
+          <div class="kpi"><div class="k">Best ward ΔT</div><div class="v big cool" id="sMax">–</div></div>
+          <div class="kpi"><div class="k">Wards treated</div><div class="v big" id="sN">–</div></div>
+        </div>
+        <div class="hint" style="margin-top:9px">
+          <span class="dot" style="background:#4575b4"></span>cooler
+          <span class="dot" style="background:#fee090;margin-left:8px"></span>mid
+          <span class="dot" style="background:#d73027;margin-left:8px"></span>hotter
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <b>How ΔT is estimated.</b> This preview linearises the surface energy balance around each ward's
+    measured temperature: raising albedo cuts absorbed shortwave, and adding vegetation adds latent
+    (evaporative) cooling, each scaled by the ward's built-up share and the restoring term
+    4εσT³ + ρc<sub>p</sub>/r<sub>ah</sub>. Effects are clamped to published tropical field ranges
+    (cool roofs ≈1.5–4 °C, greening ≈0.5–3 °C). <b>It is a physically-grounded stand-in, not the trained
+    PINN</b> — the PINN will replace this estimator once trained, using the same ward inputs.
+    Baseline LST is the 2015–2026 dry-season Landsat mean; 27 water-dominated wards use the city-mean baseline (shown fainter).
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.js"></script>
+<script src="ward_data.js"></script>
+<script>
+(function(){
+  "use strict";
+  const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
+  const D=window.WARD_DATA, C=window.CLIMATE;
+  if(!D||!window.maplibregl){document.getElementById('map').innerHTML='<p style="padding:16px">Map failed to load.</p>';return;}
+
+  // ---- physics stand-in (first-order SEB) ----
+  const P={sigma:5.670374419e-8,eps:0.96,rho_cp:1204.8,rah:60,roofShare:0.5,kET:0.42,canopyBonus:1.35};
+  const lambdaOf=tsC=>4*P.eps*P.sigma*Math.pow(tsC+273.15,3)+P.rho_cp/P.rah;
+  const builtFrac=ndvi=>clamp(1-clamp((ndvi-0.10)/0.60,0,1),0,1);
+  function deltaT(w,ctrl){
+    const S=C.s_down, lam=lambdaOf(w.lst_c), bf=builtFrac(w.ndvi); let dT=0;
+    if(ctrl.cool>w.albedo) dT+=-((ctrl.cool-w.albedo)*S/lam)*bf*P.roofShare;
+    if(ctrl.green>0)       dT+=-(P.kET*ctrl.green*(S/lam))*bf;
+    if(ctrl.canopy>0)      dT+=-(P.kET*ctrl.canopy*(S/lam))*bf*P.canopyBonus;
+    return clamp(dT,-6,0);
+  }
+
+  // ---- state ----
+  const ctrl={cool:0.15,green:0,canopy:0};
+  let view="base", selected=null, scope="selected";
+
+  // ---- color ramps ----
+  // both ordered ascending by value (ramp() requires it)
+  const lstStops=[[30,'#4575b4'],[34,'#91bfdb'],[37,'#fee090'],[40,'#fc8d59'],[44,'#d73027']];
+  const dtStops =[[-4.5,'#006d2c'],[-3,'#31a354'],[-2,'#74c476'],[-1,'#c7e9c0'],[0,'#f1efe9']];
+  function ramp(stops,x){
+    if(x<=stops[0][0])return stops[0][1];
+    for(let i=1;i<stops.length;i++){if(x<=stops[i][0]){
+      const [x0,c0]=stops[i-1],[x1,c1]=stops[i];return lerp(c0,c1,(x-x0)/(x1-x0));}}
+    return stops[stops.length-1][1];
+  }
+  function hex(c){return[parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)];}
+  function lerp(a,b,t){const A=hex(a),B=hex(b);t=clamp(t,0,1);
+    return`rgb(${Math.round(A[0]+(B[0]-A[0])*t)},${Math.round(A[1]+(B[1]-A[1])*t)},${Math.round(A[2]+(B[2]-A[2])*t)})`;}
+
+  function computeDelta(props){
+    const active = scope==="all" || (selected && props.ward_id===selected);
+    return active?deltaT(props,ctrl):0;
+  }
+  function displayValue(props){
+    const d=computeDelta(props);
+    if(view==="base")return props.lst_c;
+    if(view==="after")return props.lst_c+d;
+    return d;
+  }
+  function colorFor(props){
+    const v=displayValue(props);
+    return view==="delta"?ramp(dtStops,v):ramp(lstStops,v);
+  }
+
+  // decorate features with computed props for setData
+  function decorate(){
+    D.features.forEach(f=>{f.properties._c=colorFor(f.properties);
+      f.properties._op=f.properties.has_data?0.86:0.5;});
+    return D;
+  }
+
+  // ---- map ----
+  const map=new maplibregl.Map({
+    container:'map',
+    style:{version:8,sources:{},layers:[{id:'bg',type:'background',
+      paint:{'background-color':getVar('--panel-2')}}]},
+    attributionControl:false, dragRotate:false, pitchWithRotate:false
+  });
+  function getVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||'#eee';}
+
+  map.on('load',()=>{
+    map.addSource('wards',{type:'geojson',data:decorate(),promoteId:'ward_id'});
+    map.addLayer({id:'fill',type:'fill',source:'wards',
+      paint:{'fill-color':['to-color',['get','_c']],'fill-opacity':['get','_op']}});
+    window._map=map;
+    map.addLayer({id:'line',type:'line',source:'wards',
+      paint:{'line-color':getVar('--line'),'line-width':0.7}});
+    map.addLayer({id:'sel',type:'line',source:'wards',filter:['==','ward_id','__none__'],
+      paint:{'line-color':getVar('--accent'),'line-width':3}});
+
+    // fit to data
+    const b=new maplibregl.LngLatBounds();
+    D.features.forEach(f=>eachCoord(f.geometry,(x,y)=>b.extend([x,y])));
+    map.fitBounds(b,{padding:24,duration:0});
+
+    map.on('mousemove','fill',e=>{map.getCanvas().style.cursor='pointer';});
+    map.on('mouseleave','fill',()=>{map.getCanvas().style.cursor='';});
+    map.on('click','fill',e=>{selectWard(e.features[0].properties.ward_id);});
+    refresh();
+  });
+
+  function eachCoord(g,cb){const c=g.coordinates;
+    const walk=a=>{if(typeof a[0]==='number')cb(a[0],a[1]);else a.forEach(walk);};walk(c);}
+
+  document.getElementById('zin').onclick=()=>map.zoomIn();
+  document.getElementById('zout').onclick=()=>map.zoomOut();
+
+  // ---- interactions ----
+  function selectWard(id){
+    selected=id; scope="selected";
+    document.querySelector('input[name=scope][value=selected]').checked=true;
+    if(map.getLayer('sel'))map.setFilter('sel',['==','ward_id',id]);
+    refresh();
+  }
+  document.querySelectorAll('.viewtabs button').forEach(btn=>btn.onclick=()=>{
+    view=btn.dataset.view;
+    document.querySelectorAll('.viewtabs button').forEach(b=>b.setAttribute('aria-pressed',b===btn));
+    refresh();
+  });
+  document.querySelectorAll('input[name=scope]').forEach(r=>r.onchange=()=>{scope=r.value;refresh();});
+  const cool=document.getElementById('cool'),green=document.getElementById('green'),canopy=document.getElementById('canopy');
+  [cool,green,canopy].forEach(s=>s.oninput=()=>{ctrl.cool=+cool.value;ctrl.green=+green.value;ctrl.canopy=+canopy.value;refresh();});
+  document.getElementById('reset').onclick=()=>{
+    ctrl.cool=0.15;ctrl.green=0;ctrl.canopy=0;cool.value=0.15;green.value=0;canopy.value=0;refresh();};
+
+  // ---- render ----
+  const $=id=>document.getElementById(id);
+  const fmtT=v=>v.toFixed(1)+'°C', fmtD=v=>(v<=-0.05?v.toFixed(1):'0.0')+'°C';
+  function findWard(id){return D.features.find(f=>f.properties.ward_id===id);}
+
+  function refresh(){
+    if(map.getSource('wards'))map.getSource('wards').setData(decorate());
+
+    // control value labels
+    $('vCool').textContent = ctrl.cool>0.155? 'α → '+ctrl.cool.toFixed(2):'off';
+    $('vGreen').textContent= ctrl.green>0? '+'+ctrl.green.toFixed(2)+' NDVI':'off';
+    $('vCanopy').textContent=ctrl.canopy>0?'+'+ctrl.canopy.toFixed(2)+' NDVI':'off';
+
+    // legend
+    const delta=view==="delta";
+    $('legTitle').textContent = view==="base"?"Baseline LST":view==="after"?"LST after intervention":"Cooling ΔT";
+    // delta: left = 0 (no change), right = max cooling, so draw dtStops reversed
+    const gstops=delta?dtStops.slice().reverse():lstStops;
+    const grad=gstops.map((s,i)=>s[1]+' '+(100*i/(gstops.length-1)).toFixed(0)+'%').join(',');
+    $('legBar').style.background='linear-gradient(90deg,'+grad+')';
+    $('legLo').textContent=delta?'0':lstStops[0][0]+'°C';
+    $('legHi').textContent=delta?'−'+Math.abs(dtStops[0][0])+'°C':lstStops[lstStops.length-1][0]+'°C';
+
+    // selected ward card
+    if(selected){const w=findWard(selected).properties;const d=deltaT(w,ctrl);
+      $('selName').textContent=w.ward_name+(w.ward_no?'  · Ward '+w.ward_no:'');
+      $('selMeta').textContent=w.has_data?(w.npix.toLocaleString()+' land pixels · NDVI '+w.ndvi.toFixed(2)+' · albedo '+w.albedo.toFixed(2)):'No land pixels — city-mean baseline (estimated)';
+      $('kBase').textContent=fmtT(w.lst_c);
+      $('kAfter').textContent=fmtT(w.lst_c+(scope==="selected"||scope==="all"?d:0));
+      $('kDelta').textContent=fmtD(d);
+      $('kBuilt').textContent=Math.round(builtFrac(w.ndvi)*100)+'%';
+    }else{
+      $('selName').textContent='No ward selected';$('selMeta').textContent='Click a ward on the map to select it.';
+      ['kBase','kAfter','kDelta','kBuilt'].forEach(k=>$(k).textContent='–');
+    }
+
+    // city summary (over treated set)
+    let deltas=D.features.map(f=>computeDelta(f.properties)).filter(x=>x<-0.001);
+    const base=D.features.reduce((a,f)=>a+f.properties.lst_c,0)/D.features.length;
+    $('sBase').textContent=fmtT(base);
+    if(deltas.length){const mean=deltas.reduce((a,b)=>a+b,0)/deltas.length;
+      $('sDelta').textContent=fmtD(mean);$('sMax').textContent=fmtD(Math.min(...deltas));
+      $('sN').textContent=deltas.length;
+    }else{$('sDelta').textContent='0.0°C';$('sMax').textContent='0.0°C';$('sN').textContent='0';}
+  }
+
+  // re-theme background on OS theme flip
+  const mq=window.matchMedia('(prefers-color-scheme:dark)');
+  mq.addEventListener&&mq.addEventListener('change',()=>{
+    if(map.getLayer('bg'))map.setPaintProperty('bg','background-color',getVar('--panel-2'));
+    if(map.getLayer('line'))map.setPaintProperty('line','line-color',getVar('--line'));
+    if(map.getLayer('sel'))map.setPaintProperty('sel','line-color',getVar('--accent'));
+  });
+})();
+</script>
