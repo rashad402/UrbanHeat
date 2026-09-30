@@ -25,7 +25,9 @@ import yaml
 # Allow running as a plain script (python scripts/first_slice_lst.py) without installing the package.
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from data_engine.indices import lst_from_landsat_l2  # noqa: E402
+from data_engine.indices import (  # noqa: E402
+    LANDSAT_ST_SCALE, LANDSAT_ST_OFFSET, KELVIN_0C,
+)
 
 
 def load_config(path):
@@ -53,8 +55,12 @@ def mask_landsat_c2_l2(image):
 
 
 def add_lst_celsius(image):
-    """Add an 'LST' band in degC from the scaled ST_B10 product."""
-    lst_c = lst_from_landsat_l2(image.select("ST_B10"), to_celsius=True).rename("LST")
+    """Add an 'LST' band in degC from the scaled ST_B10 product (EE-native ops)."""
+    lst_c = (image.select("ST_B10")
+             .multiply(LANDSAT_ST_SCALE)
+             .add(LANDSAT_ST_OFFSET)
+             .subtract(KELVIN_0C)
+             .rename("LST"))
     return image.addBands(lst_c)
 
 
