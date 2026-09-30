@@ -48,6 +48,7 @@ grid:
 sampling:
   target_rows: 150000
   strategy: "stratified_by_ward_and_date"
+  per_scene: 3000            # pixels sampled per scene via getInfo (keep <= 5000)
 
 split:
   policy: "spatial_block"                     # NOT random pixel split (avoids leakage)

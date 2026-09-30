@@ -7,7 +7,8 @@ avoid neighbour leakage (a random pixel split inflates R^2 — do not use it).
 
 import json
 
-INPUT_COLUMNS = ["x", "y", "ndvi", "ndbi", "albedo", "s_down", "t_air", "rh", "wind"]
+# Spatial coords use lon/lat directly (normalized during training, so units don't matter).
+INPUT_COLUMNS = ["lon", "lat", "ndvi", "ndbi", "albedo", "s_down", "t_air", "rh", "wind"]
 TARGET_COLUMN = "lst"
 
 
