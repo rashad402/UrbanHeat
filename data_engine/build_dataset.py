@@ -58,12 +58,18 @@ def aoi_geometry(config):
 
 
 def process_scene(img):
-    """Cloud-mask a raw Landsat C2 L2 image and return a stacked feature image."""
+    """Cloud-mask a raw Landsat C2 L2 image and return a stacked feature image.
+
+    Water is masked out (MNDWI > 0): this is a LAND surface temperature / urban-heat model,
+    and including water (cool, negative NDVI) confounds the feature-LST relationships
+    (e.g. it flips the NDVI-LST correlation from the physically expected negative to positive).
+    """
     img = mask_landsat_qa(img)
-    sr = img.select(["SR_B2", "SR_B4", "SR_B5", "SR_B6", "SR_B7"]).multiply(SR_SCALE).add(SR_OFFSET)
+    sr = img.select(["SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"]).multiply(SR_SCALE).add(SR_OFFSET)
 
     ndvi = sr.normalizedDifference(["SR_B5", "SR_B4"]).rename("ndvi")
     ndbi = sr.normalizedDifference(["SR_B6", "SR_B5"]).rename("ndbi")
+    mndwi = sr.normalizedDifference(["SR_B3", "SR_B6"]).rename("mndwi")   # >0 => water
     albedo = sr.expression(
         "0.300*B + 0.277*R + 0.233*N + 0.143*S1 + 0.047*S2",
         {"B": sr.select("SR_B2"), "R": sr.select("SR_B4"), "N": sr.select("SR_B5"),
@@ -76,6 +82,7 @@ def process_scene(img):
     lonlat = ee.Image.pixelLonLat().rename(["lon", "lat"])
 
     return (ndvi.addBands([ndbi, albedo, lst, climate, lonlat])
+            .updateMask(mndwi.lte(0))                        # keep land only
             .set("system:time_start", millis))
 
 
