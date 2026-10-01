@@ -77,6 +77,10 @@ ROOF_SHARE_PATH = "configs/roof_share_kochi.json"
 # just stops drawing, with no error anywhere — so the URL is re-minted on a timer and on demand
 # via /api/refresh_tiles.
 TILE_TTL_S = 45 * 60
+
+# Pixels sampled for a drawn selection. The area is measured from the geometry, never from
+# this count — see _region_area_sqkm.
+DRAW_SAMPLE_PIXELS = 600
 SCENE_MARGIN = 0.12      # fractional padding around the corporation, for geographic context
 MIN_ASPECT = 1.0         # widen east-west so the map fills a landscape viewport
 TILE_DIM = 1100          # Earth Engine refuses a single thumbnail much above this (HTTP 400)
@@ -413,9 +417,10 @@ class Interventions(BaseModel):
 
 
 class Selection(BaseModel):
-    kind: str                              # "wards" | "bbox"
+    kind: str                              # "wards" | "bbox" | "polygon"
     ward_ids: list[str] | None = None
     bounds: list[float] | None = None      # [west, south, east, north]
+    coordinates: list[list[float]] | None = None   # polygon ring, [[lon, lat], ...]
 
 
 class AnalyzeRequest(BaseModel):
@@ -463,6 +468,38 @@ def _pixel_response(frame, iv):
         "roof_share_source": share_src,
         "seb_residual": r["seb_residual"],
     }
+
+
+def _drawn_region(sel):
+    """Earth Engine geometry for a drawn selection, plus its centre (lon, lat).
+
+    Planners do not work in rectangles, so an arbitrary polygon is accepted alongside the
+    rubber-band box. Both go down the same sampling path.
+    """
+    if sel.kind == "bbox":
+        if not sel.bounds or len(sel.bounds) != 4:
+            raise HTTPException(400, "bbox selection needs bounds [w,s,e,n]")
+        w, s, e, n = sel.bounds
+        return ee.Geometry.Rectangle([w, s, e, n]), ((w + e) / 2, (s + n) / 2)
+
+    ring = sel.coordinates or []
+    if len(ring) < 3:
+        raise HTTPException(400, "polygon selection needs at least 3 coordinates")
+    if any(len(pt) != 2 for pt in ring):
+        raise HTTPException(400, "polygon coordinates must be [lon, lat] pairs")
+    if ring[0] != ring[-1]:
+        ring = ring + [ring[0]]
+    cx = sum(p[0] for p in ring[:-1]) / (len(ring) - 1)
+    cy = sum(p[1] for p in ring[:-1]) / (len(ring) - 1)
+    return ee.Geometry.Polygon([ring]), (cx, cy)
+
+
+def _region_area_sqkm(region):
+    """True area of a drawn geometry [km^2], measured by Earth Engine."""
+    try:
+        return float(region.area(maxError=1).getInfo()) / 1e6
+    except Exception as exc:
+        raise HTTPException(502, f"could not measure the drawn area ({exc})")
 
 
 def _season_frame(season):
@@ -517,13 +554,10 @@ def analyze(req: AnalyzeRequest):
         area = float(np.nansum([i["area_sqkm"] or 0 for i in items]))
         all_dt = res["delta_t"].to_numpy(dtype="float64")
 
-    elif sel.kind == "bbox":
-        if not sel.bounds or len(sel.bounds) != 4:
-            raise HTTPException(400, "bbox selection needs bounds [w,s,e,n]")
-        w, s, e, n = sel.bounds
-        region = ee.Geometry.Rectangle([w, s, e, n])
+    elif sel.kind in ("bbox", "polygon"):
+        region, centre = _drawn_region(sel)
         # Sample ACTUAL pixels rather than reducing to a mean feature vector first.
-        fc = S["feat"].sample(region=region, scale=30, numPixels=600,
+        fc = S["feat"].sample(region=region, scale=30, numPixels=DRAW_SAMPLE_PIXELS,
                               seed=1, dropNulls=True, geometries=False).getInfo()
         rows = [f["properties"] for f in fc.get("features", [])]
         rows = [r for r in rows if r.get("lst") is not None]
@@ -533,13 +567,17 @@ def analyze(req: AnalyzeRequest):
         frame = pd.DataFrame(rows)
         for c in INPUT_COLUMNS:
             if c not in frame:
-                frame[c] = {"lon": (w + e) / 2, "lat": (s + n) / 2}.get(c, 0.0)
+                frame[c] = {"lon": centre[0], "lat": centre[1]}.get(c, 0.0)
         frame = frame.dropna(subset=[c for c in INPUT_COLUMNS if c in frame] + ["lst"])
         out = _pixel_response(frame, iv)
 
-        area = len(frame) * 900 / 1e6
+        # The TRUE area of the drawn shape, from the geometry. It must not be derived from the
+        # sample size: the sample is capped at DRAW_SAMPLE_PIXELS, so counting sampled pixels
+        # silently clamped every large drawn area to the same few hundred metres square.
+        area = _region_area_sqkm(region)
         all_dt = out["delta_t"]
-        items = [{"ward_id": "area", "name": "Drawn area", "area_sqkm": round(area, 3),
+        label = "Drawn area" if sel.kind == "bbox" else "Drawn zone"
+        items = [{"ward_id": "area", "name": label, "area_sqkm": round(area, 3),
                   "t_base": round(float(np.mean(out["t_base"])), 2),
                   "t_new": round(float(np.mean(out["t_base"] + out["delta_t"])), 2),
                   "delta_t": round(float(np.mean(out["delta_t"])), 2),

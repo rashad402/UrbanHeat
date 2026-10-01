@@ -13,7 +13,8 @@ Only the handful of calls that actually RETURN DATA are given real behaviour:
     <collection>.size().getInfo()                 the scene count behind the baseline
     <image>.getMapId(...)                         a signed tile URL (counted, so tests can prove
                                                   /api/refresh_tiles actually re-mints it)
-    <image>.sample(...).getInfo()                 pixels for a drawn bbox
+    <image>.sample(...).getInfo()                 pixels for a drawn area
+    <geometry>.area(...).getInfo()                the true area of a drawn shape
 
 Install it with `install()` BEFORE importing api.planner.
 """
@@ -26,6 +27,8 @@ SAMPLE_ROWS = []
 # Bounding ring returned by aoi.bounds().coordinates().getInfo().
 BOUNDS = [[[76.20, 9.90], [76.36, 9.90], [76.36, 10.06], [76.20, 10.06], [76.20, 9.90]]]
 N_SCENES = 37
+# Area in m^2 returned by <geometry>.area().getInfo() for a drawn selection.
+REGION_AREA_M2 = 2_400_000.0
 
 mapid_calls = {"n": 0}
 
@@ -56,12 +59,14 @@ class _Chain:
                     return BOUNDS
                 if self._kind == "size":
                     return N_SCENES
+                if self._kind == "area":
+                    return REGION_AREA_M2
                 if self._kind == "sample":
                     return {"features": [{"properties": dict(r)} for r in SAMPLE_ROWS]}
                 return None
             return get_info
         # Remember the calls whose results the planner actually reads.
-        if name in ("coordinates", "size", "sample"):
+        if name in ("coordinates", "size", "sample", "area"):
             return _Chain(name)
         return _Chain(self._kind)
 

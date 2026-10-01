@@ -239,6 +239,25 @@ def main():
               and bb["items"][0]["npix"] == len(fake_ee.SAMPLE_ROWS),
               f"{bb['summary']['n_pixels']} px")
 
+        check("drawn area is measured from the geometry, not the sample size",
+              abs(bb["items"][0]["area_sqkm"] - fake_ee.REGION_AREA_M2 / 1e6) < 1e-3,
+              f"{bb['items'][0]['area_sqkm']} km² from geometry; "
+              f"counting {len(fake_ee.SAMPLE_ROWS)} sampled pixels would give "
+              f"{len(fake_ee.SAMPLE_ROWS) * 900 / 1e6:.3f} km²")
+
+        poly = client.post("/api/analyze", json={
+            "selection": {"kind": "polygon",
+                          "coordinates": [[76.25, 9.95], [76.27, 9.95],
+                                          [76.27, 9.97], [76.26, 9.98]]},
+            "interventions": {"albedo_set": 0.5}, "season": None})
+        check("polygon selection is analysed like a bbox",
+              poly.status_code == 200 and poly.json()["items"][0]["name"] == "Drawn zone",
+              f"HTTP {poly.status_code}")
+        badpoly = client.post("/api/analyze", json={
+            "selection": {"kind": "polygon", "coordinates": [[76.25, 9.95], [76.27, 9.95]]},
+            "interventions": {"albedo_set": 0.5}})
+        check("degenerate polygon returns 400", badpoly.status_code == 400)
+
         fake_ee.SAMPLE_ROWS = []
         empty = post(client, "/api/analyze", albedo=0.5, bbox=[76.0, 9.0, 76.01, 9.01])
         check("empty drawn area returns 422, not a 500",
