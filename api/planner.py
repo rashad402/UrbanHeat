@@ -45,14 +45,108 @@ SIMPLIFY_TOL = 0.00025          # ~28 m — keeps the SVG light without visible 
 app = FastAPI(title="UrbanHeat Planner")
 S = {}
 
+
+def _load_env(path=".env"):
+    """Minimal .env reader — keeps the Mapbox token out of committed source."""
+    if os.path.exists(path):
+        for line in open(path, encoding="utf-8"):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_env()
+MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN", "")
+
 PALETTE = ["313695", "4575b4", "74add1", "abd9e9", "fee090",
            "fdae61", "f46d43", "d73027", "a50026"]
 LST_MIN, LST_MAX = 28, 46
 
 
-def _fetch_b64(url):
-    data = urllib.request.urlopen(url, timeout=180).read()
-    return "data:image/png;base64," + base64.b64encode(data).decode()
+SCENE_MARGIN = 0.12      # fractional padding around the corporation, for geographic context
+MIN_ASPECT = 1.0         # widen east-west so the map fills a landscape viewport
+TILE_DIM = 1100          # Earth Engine refuses a single thumbnail much above this (HTTP 400)
+SAT_GRID = 2             # 2x2 tiles -> ~2200 px of satellite detail (~10 m/px, S2 native)
+LST_DIM = 1100           # Landsat is 30 m, so one tile already over-samples it
+
+
+def _fetch_b64(url, mime="image/png"):
+    data = urllib.request.urlopen(url, timeout=240).read()
+    return f"data:{mime};base64," + base64.b64encode(data).decode()
+
+
+def _render_tiled(image, vis, bounds, grid=2, dim=TILE_DIM, quality=86):
+    """Render an ee.Image above the single-thumbnail size limit by tiling and stitching.
+
+    Earth Engine caps one getThumbURL render (anything much over ~1100 px returns 400), so the
+    scene is fetched as a grid of tiles in parallel and composited locally.
+    """
+    import io
+    from concurrent.futures import ThreadPoolExecutor
+    from PIL import Image
+
+    w, s, e, n = bounds
+    dw, dh = (e - w) / grid, (n - s) / grid
+    jobs = []
+    for r in range(grid):                       # rows run north -> south
+        for c in range(grid):
+            tw, te = w + c * dw, w + (c + 1) * dw
+            tn, ts = n - r * dh, n - (r + 1) * dh
+            url = image.getThumbURL({**vis, "region": ee.Geometry.Rectangle([tw, ts, te, tn]),
+                                     "dimensions": dim, "format": "jpg"})
+            jobs.append((r, c, url))
+
+    def fetch(job):
+        r, c, url = job
+        raw = urllib.request.urlopen(url, timeout=300).read()
+        return r, c, Image.open(io.BytesIO(raw)).convert("RGB")
+
+    with ThreadPoolExecutor(max_workers=grid * grid) as ex:
+        tiles = list(ex.map(fetch, jobs))
+
+    tw_px, th_px = tiles[0][2].size
+    out = Image.new("RGB", (tw_px * grid, th_px * grid))
+    for r, c, im in tiles:
+        if im.size != (tw_px, th_px):
+            im = im.resize((tw_px, th_px), Image.LANCZOS)
+        out.paste(im, (c * tw_px, r * th_px))
+
+    buf = io.BytesIO()
+    out.save(buf, "JPEG", quality=quality, optimize=True)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(), out.size
+
+
+def _scene_bounds(aoi):
+    """Pad the corporation bbox for context and widen it toward a landscape aspect."""
+    b = aoi.bounds().coordinates().getInfo()[0]
+    w, s, e, n = b[0][0], b[0][1], b[2][0], b[2][1]
+    dw, dh = e - w, n - s
+    w -= dw * SCENE_MARGIN; e += dw * SCENE_MARGIN
+    s -= dh * SCENE_MARGIN; n += dh * SCENE_MARGIN
+    dw, dh = e - w, n - s
+    if dw / dh < MIN_ASPECT:                      # too portrait -> grow sideways
+        need = MIN_ASPECT * dh - dw
+        w -= need / 2; e += need / 2
+    return [w, s, e, n]
+
+
+@app.middleware("http")
+async def _revalidate_assets(request, call_next):
+    """Force the browser to revalidate app code. ETags make this cheap (304s), and it prevents
+    a stale cached app.js from silently shadowing a deployed fix."""
+    resp = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.endswith((".html", ".js", ".css")):
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return resp
+
+
+SCENE_CACHE = "data/processed/scene_cache.json"
+
+
+def _scene_cache_key(bounds):
+    return f"{[round(b, 5) for b in bounds]}|{SAT_GRID}x{TILE_DIM}|{LST_DIM}|{LST_MIN}-{LST_MAX}"
 
 
 @app.on_event("startup")
@@ -65,25 +159,27 @@ def _startup():
     col = build_collection(cfg, aoi, cfg["time"]["start"], cfg["time"]["end"])
     col = col.map(lambda im: im.set("month", ee.Image(im).date().get("month"))) \
              .filter(ee.Filter.inList("month", dry))
-    feat = col.median().clip(aoi)
+    S["bounds"] = _scene_bounds(aoi)
+    west, south, east, north = S["bounds"]
+    region = ee.Geometry.Rectangle([west, south, east, north])
+
+    # Clip to the padded scene, not the corporation, so the thermal layer covers the whole map
+    # and a drawn area anywhere on screen returns data.
+    feat = col.median().clip(region)
     lst_c = feat.select("lst").subtract(273.15).rename("lst_c")
     S["feat"] = feat.addBands(lst_c)
     S["aoi"] = aoi
 
-    b = aoi.bounds().coordinates().getInfo()[0]
-    west, south, east, north = b[0][0], b[0][1], b[2][0], b[2][1]
-    S["bounds"] = [west, south, east, north]
-    region = ee.Geometry.Rectangle([west, south, east, north])
+    S["s2"] = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+               .filterBounds(region).filterDate("2024-01-01", cfg["time"]["end"])
+               .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 15)).median())
+    S["lst_c"], S["region"] = lst_c, region
 
-    s2 = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-          .filterBounds(aoi).filterDate("2024-01-01", cfg["time"]["end"])
-          .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 15)).median())
-    print("Rendering scene from Earth Engine ...")
-    S["sat"] = _fetch_b64(s2.getThumbURL({"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000,
-                                          "region": region, "dimensions": 1100, "format": "png"}))
-    S["lst"] = _fetch_b64(lst_c.clip(aoi).getThumbURL(
-        {"min": LST_MIN, "max": LST_MAX, "palette": PALETTE,
-         "region": region, "dimensions": 1100, "format": "png"}))
+    # Thermal layer as Earth Engine TILES: zoomable with the Mapbox basemap, and it makes
+    # startup fast (the stitched static scene is only rendered on demand, as a fallback).
+    mapid = lst_c.getMapId({"min": LST_MIN, "max": LST_MAX, "palette": PALETTE})
+    S["lst_tiles"] = mapid["tile_fetcher"].url_format
+    print("Earth Engine LST tile layer ready")
 
     S["model"] = PinnModel()
     df = pd.read_parquet(PARQUET)
@@ -92,7 +188,34 @@ def _startup():
     agg["npix"] = df.groupby("ward_id").size()
     S["wards"] = agg
     S["wards_geo"] = _ward_geojson(agg)
-    print(f"Planner ready — model {S['model'].name}, {len(agg)} wards with data")
+    print(f"Planner ready - model {S['model'].name}, {len(agg)} wards with data")
+
+
+def _render_scene(s2, lst_c, region, key):
+    print(f"Rendering satellite scene ({SAT_GRID}x{SAT_GRID} tiles) ...")
+    try:
+        S["sat"], size = _render_tiled(
+            s2, {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000, "gamma": 1.15},
+            S["bounds"], grid=SAT_GRID)
+        print(f"  satellite {size[0]}x{size[1]} px")
+    except Exception as exc:                      # never let detail cost us the whole scene
+        print(f"  tiled render failed ({exc}); falling back to a single tile")
+        S["sat"] = _fetch_b64(s2.getThumbURL(
+            {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000, "gamma": 1.15,
+             "region": region, "dimensions": TILE_DIM, "format": "jpg"}), "image/jpeg")
+
+    print("Rendering thermal overlay ...")
+    S["lst"] = _fetch_b64(lst_c.getThumbURL(
+        {"min": LST_MIN, "max": LST_MAX, "palette": PALETTE,
+         "region": region, "dimensions": LST_DIM, "format": "png"}))
+
+    try:
+        os.makedirs(os.path.dirname(SCENE_CACHE), exist_ok=True)
+        with open(SCENE_CACHE, "w", encoding="utf-8") as fh:
+            json.dump({"key": key, "sat": S["sat"], "lst": S["lst"]}, fh)
+        print("Scene cached to disk")
+    except Exception as exc:
+        print(f"Could not cache scene ({exc})")
 
 
 def _ward_geojson(agg):
@@ -121,6 +244,22 @@ def _ward_geojson(agg):
 
 @app.get("/api/scene")
 def scene():
+    """Static stitched scene — only used when the browser cannot run Mapbox GL (no WebGL).
+
+    Rendered lazily on first request (it costs minutes) and cached to disk afterwards.
+    """
+    if "sat" not in S:
+        key = _scene_cache_key(S["bounds"])
+        if os.path.exists(SCENE_CACHE):
+            try:
+                cached = json.load(open(SCENE_CACHE, encoding="utf-8"))
+                if cached.get("key") == key:
+                    S["sat"], S["lst"] = cached["sat"], cached["lst"]
+                    print("Scene loaded from cache")
+            except Exception as exc:
+                print(f"Scene cache unreadable ({exc}); re-rendering")
+    if "sat" not in S:
+        _render_scene(S["s2"], S["lst_c"], S["region"], _scene_cache_key(S["bounds"]))
     return {"sat": S["sat"], "lst": S["lst"], "bounds": S["bounds"],
             "lst_range": [LST_MIN, LST_MAX], "palette": ["#" + c for c in PALETTE]}
 
@@ -132,8 +271,15 @@ def wards():
 
 @app.get("/api/meta")
 def meta():
+    """Client bootstrap. The Mapbox token is a PUBLIC (pk.) token, intended for browser use —
+    it is read from .env (gitignored) rather than committed, and should also be URL-restricted
+    in the Mapbox account settings."""
     return {"model": S["model"].name, "n_wards": int(len(S["wards"])),
-            "city": "Kochi, Kerala", "lst_range": [LST_MIN, LST_MAX]}
+            "city": "Kochi, Kerala", "lst_range": [LST_MIN, LST_MAX],
+            "palette": ["#" + c for c in PALETTE],
+            "bounds": S["bounds"],
+            "lst_tiles": S["lst_tiles"],
+            "mapbox_token": MAPBOX_TOKEN}
 
 
 class Interventions(BaseModel):

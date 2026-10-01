@@ -7,6 +7,8 @@
 <meta name="description" content="Physics-informed urban heat mitigation planning for Kochi Municipal Corporation.">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -33,20 +35,12 @@
 
   <!-- ───────────────── map stage ───────────────── -->
   <section class="stage" id="stage" aria-label="Thermal map of Kochi">
-    <div class="viewport" id="viewport">
-      <div class="scene" id="scene">
-        <img id="satImg" alt="Sentinel-2 true-colour imagery of Kochi" draggable="false">
-        <img id="lstImg" alt="Landsat land surface temperature overlay" draggable="false">
-        <svg id="overlay" preserveAspectRatio="none" aria-label="Ward boundaries">
-          <g id="wardLayer"></g>
-          <rect id="drawRect" class="draw-rect" hidden></rect>
-        </svg>
-      </div>
-    </div>
+    <div id="map" class="map"></div>
+    <div id="boxDraw" class="box-draw" hidden></div>
 
     <div class="stage-loading" id="stageLoading">
       <div class="spinner" aria-hidden="true"></div>
-      <p>Rendering Sentinel-2 and Landsat imagery from Earth Engine…</p>
+      <p>Loading basemap and Earth Engine thermal layer…</p>
     </div>
 
     <!-- floating toolbar -->

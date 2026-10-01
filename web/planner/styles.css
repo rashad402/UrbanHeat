@@ -85,26 +85,31 @@ button{font-family:inherit}
 /* ───────────── map stage ───────────── */
 .stage{position:relative;overflow:hidden;min-height:440px;background:
   radial-gradient(120% 90% at 50% 0%, #15141b 0%, #0c0b0f 70%);}
-.viewport{position:absolute;inset:0;overflow:hidden;cursor:grab}
-.viewport.is-panning{cursor:grabbing}
-.viewport.is-drawing{cursor:crosshair}
-.scene{position:absolute;top:50%;left:50%;transform-origin:center center;will-change:transform;line-height:0}
-.scene img{display:block;position:absolute;inset:0;width:100%;height:100%;user-select:none;-webkit-user-drag:none}
-#satImg{position:relative}
-#lstImg{opacity:.72;transition:opacity .12s linear}
-#overlay{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.map{position:absolute;inset:0}
+.map.is-drawing .mapboxgl-canvas,
+.map.is-drawing .mapboxgl-canvas-container{cursor:crosshair}
 
-.ward{
-  fill:transparent; stroke:rgba(255,255,255,.26); stroke-width:.9;
-  cursor:pointer; transition:fill .1s ease, stroke .1s ease;
-  vector-effect:non-scaling-stroke;
+/* rubber-band selection box (screen space, converted to lng/lat on release) */
+.box-draw{
+  position:absolute;z-index:15;pointer-events:none;
+  border:1.6px dashed var(--accent-bright);background:rgba(25,194,168,.18);
+  border-radius:2px;
 }
-.ward:hover{fill:rgba(255,255,255,.14);stroke:rgba(255,255,255,.75)}
-.ward.is-selected{fill:rgba(25,194,168,.30);stroke:var(--accent-bright);stroke-width:2}
-.ward.no-data{stroke:rgba(255,255,255,.12);stroke-dasharray:3 3;cursor:not-allowed}
-.ward.no-data:hover{fill:transparent}
-.draw-rect{fill:rgba(25,194,168,.18);stroke:var(--accent-bright);stroke-width:1.6;
-  stroke-dasharray:5 3;vector-effect:non-scaling-stroke}
+
+/* Mapbox chrome, retuned for the console palette */
+.mapboxgl-popup-content{
+  background:var(--surface-2);color:var(--fg);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:7px 10px;font-family:var(--font-ui);font-size:12px;
+  box-shadow:var(--shadow);line-height:1.45;
+}
+.mapboxgl-popup-content strong{font-weight:600}
+.mapboxgl-popup-tip{border-top-color:var(--surface-2)!important;border-bottom-color:var(--surface-2)!important}
+.mapboxgl-ctrl-attrib{background:rgba(14,13,17,.72)!important;border-radius:4px 0 0 0}
+.mapboxgl-ctrl-attrib a{color:var(--muted)!important}
+.mapboxgl-ctrl-scale{
+  background:rgba(14,13,17,.72);border-color:var(--faint);color:var(--muted);
+  font-family:var(--font-mono);font-size:10px;
+}
 
 .stage-loading{
   position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:14px;
