@@ -41,6 +41,45 @@
     toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 6000 : 3000);
   }
 
+  /* ───────────────── slider chrome ─────────────────
+   * Each <input type=range> gets wrapped in the layered slider: a rail, an animated fill with a
+   * travelling sheen, and a pulsing halo tracking the thumb. The input itself stays the control —
+   * it keeps keyboard stepping, focus and screen-reader semantics, and the layers behind it are
+   * positioned purely off the --p custom property (0–1) on the wrapper. Styles degrade to a plain
+   * styled slider if this never runs, so an early boot failure is not a broken rail.
+   */
+  const repaints = [];
+
+  function enhanceRanges() {
+    document.querySelectorAll("input[type=range]").forEach((input) => {
+      if (input.closest(".sld")) return;
+
+      const wrap = document.createElement("div");
+      wrap.className = "sld";
+      input.replaceWith(wrap);
+      wrap.innerHTML = `<span class="sld-rail"></span>
+        <span class="sld-fill"><i class="sld-sheen"></i></span>
+        <span class="sld-halo"></span>`;
+      wrap.appendChild(input);
+
+      const paint = () => {
+        const min = +input.min || 0;
+        const max = input.max === "" ? 1 : +input.max;
+        const span = max - min;
+        const f = span > 0 ? (+input.value - min) / span : 0;
+        wrap.style.setProperty("--p", f.toFixed(4));
+        // A slider sitting at its floor is not a live value, so it stops pulsing.
+        wrap.classList.toggle("is-zero", +input.value <= min);
+      };
+      input.addEventListener("input", paint);
+      repaints.push(paint);
+      paint();
+    });
+  }
+
+  // Presets and any other code path that sets .value directly fires no 'input' event.
+  const repaintRanges = () => repaints.forEach((p) => p());
+
   const body = () => ({
     selection: selectionPayload(),
     interventions: {
@@ -51,12 +90,15 @@
 
   /* ───────────────────────── boot ───────────────────────── */
   async function boot() {
+    // Before anything that can fail: the rail is visible while the map and data load.
+    enhanceRanges();
+
     let meta, wards;
     try {
       [meta, wards] = await Promise.all([api("/api/meta"), api("/api/wards")]);
     } catch (err) {
-      return fail(`<p style="color:#f06a5d;max-width:36ch">Could not reach the backend.<br><br>
-        <span style="color:#8a8498">Start it with<br>
+      return fail(`<p style="color:#b83820;max-width:36ch">Could not reach the backend.<br><br>
+        <span style="color:#6b7c78">Start it with<br>
         <code style="font-family:IBM Plex Mono,monospace">uvicorn api.planner:app --port 8080</code></span></p>`);
     }
     state.meta = meta;
@@ -70,13 +112,13 @@
     $("legHi").textContent = meta.lst_range[1] + "°C";
 
     if (!window.mapboxgl || !mapboxgl.supported()) {
-      return fail(`<p style="color:#e3a94e;max-width:40ch">This browser cannot run Mapbox GL
-        (WebGL unavailable).<br><br><span style="color:#8a8498">Enable hardware acceleration, or
+      return fail(`<p style="color:#8a6410;max-width:40ch">This browser cannot run Mapbox GL
+        (WebGL unavailable).<br><br><span style="color:#6b7c78">Enable hardware acceleration, or
         use the static-image build.</span></p>`);
     }
     if (!meta.mapbox_token) {
-      return fail(`<p style="color:#e3a94e;max-width:40ch">No Mapbox token configured.<br><br>
-        <span style="color:#8a8498">Add <code>MAPBOX_TOKEN=…</code> to <code>.env</code> and restart.</span></p>`);
+      return fail(`<p style="color:#8a6410;max-width:40ch">No Mapbox token configured.<br><br>
+        <span style="color:#6b7c78">Add <code>MAPBOX_TOKEN=…</code> to <code>.env</code> and restart.</span></p>`);
     }
 
     initMap(meta, wards);
@@ -105,8 +147,8 @@
     map.on("error", (ev) => {
       const m = ev && ev.error && ev.error.message || "";
       if (/access token|Unauthorized|401/i.test(m)) {
-        fail(`<p style="color:#f06a5d;max-width:40ch">Mapbox rejected the access token.<br><br>
-          <span style="color:#8a8498">Check it is a public <code>pk.</code> token and that any URL
+        fail(`<p style="color:#b83820;max-width:40ch">Mapbox rejected the access token.<br><br>
+          <span style="color:#6b7c78">Check it is a public <code>pk.</code> token and that any URL
           restriction allows <code>localhost</code>.</span></p>`);
       } else {
         console.warn("map error:", m);
@@ -133,8 +175,8 @@
     // say what is most likely wrong instead of hanging.
     setTimeout(() => {
       if (layersAdded) return;
-      fail(`<p style="color:#e3a94e;max-width:42ch">The Mapbox basemap did not load.<br><br>
-        <span style="color:#8a8498">Most likely one of:<br>
+      fail(`<p style="color:#8a6410;max-width:42ch">The Mapbox basemap did not load.<br><br>
+        <span style="color:#6b7c78">Most likely one of:<br>
         &bull; the token is URL-restricted and does not allow <code>localhost</code><br>
         &bull; no network access to <code>api.mapbox.com</code><br>
         &bull; the token has no remaining map loads<br><br>
@@ -151,7 +193,10 @@
         paint: { "raster-opacity": +$("opacity").value, "raster-resampling": "nearest" },
       });
 
-      // Ward vectors
+      // Ward vectors.
+      // These colours are deliberately NOT the interface accent. The chrome accent (#0d6e5e) is
+      // chosen for contrast against white cards and disappears against satellite imagery, so the
+      // overlay keeps the bright teal and white that read over a photographic basemap.
       map.addSource("wards", { type: "geojson", data: wards, promoteId: "ward_id" });
       map.addLayer({
         id: "ward-fill", type: "fill", source: "wards",
@@ -456,6 +501,7 @@
       $("ndviOut").textContent = state.iv.ndvi ? "+" + state.iv.ndvi.toFixed(2) + " NDVI" : "off";
       document.querySelectorAll(".preset").forEach(p => p.classList.toggle("is-active",
         Math.abs(+p.dataset.albedo - state.iv.albedo) < 1e-9 && Math.abs(+p.dataset.ndvi - state.iv.ndvi) < 1e-9));
+      repaintRanges();
     };
     $("albedo").addEventListener("input", e => { state.iv.albedo = +e.target.value; sync(); analyze(); });
     $("ndvi").addEventListener("input", e => { state.iv.ndvi = +e.target.value; sync(); analyze(); });
