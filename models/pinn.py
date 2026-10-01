@@ -1,19 +1,25 @@
 """Physics-Informed Neural Network core (plan §9).
 
-A point-wise MLP surrogate: inputs (x, y, NDVI, NDBI, albedo, S_down, T_air, RH, wind) -> LST.
-Trained with a composite loss:
+A point-wise MLP: inputs (lon, lat, NDVI, NDBI, albedo, S_down, T_air, RH, wind) -> LST.
+Identical architecture to models/baselines.MLP, so the only difference between them is the
+physics term — the PINN-vs-MLP gap isolates exactly what the SEB loss buys.
 
-    L = data_mse  +  lambda * physics_mse
-      = mean((T_pred - T_landsat)^2)  +  lambda * mean(seb_residual(T_pred)^2)
+    L = mean((T_pred - T_obs)^2)_standardised  +  lambda * mean((residual / FLUX_SCALE)^2)
 
-Recommendation: pure PyTorch (the SEB residual is algebraic, no derivatives needed).
-Use DeepXDE only if a diffusion/PDE term is added later. Config: model_config.yaml.
+The residual comes from models/sebal.seb_residual and is in W m^-2, which is O(100) while the
+standardised data term is O(0.1). Dividing by FLUX_SCALE puts both terms near O(1) so lambda is
+an interpretable weight rather than a tiny fudge factor.
+
+Pure PyTorch rather than DeepXDE: the SEB residual is algebraic (no spatial/temporal
+derivatives), so DeepXDE's PDE machinery would add dependency without doing any work here.
 """
 
 import torch
 import torch.nn as nn
 
 from .sebal import seb_residual
+
+FLUX_SCALE = 100.0          # W m^-2 — normalises the physics term to O(1)
 
 
 class PINN(nn.Module):
@@ -27,14 +33,31 @@ class PINN(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
-        """x: [N, in_dim] normalized features -> T_pred [N, 1] (Kelvin, denormalized upstream)."""
+        """x: [N, in_dim] standardised features -> standardised LST [N, 1]."""
         return self.net(x)
 
 
-def composite_loss(t_pred, t_true, features, lambda_physics):
-    """Data MSE + lambda * SEB-residual MSE. Returns (total, data_loss, physics_loss)."""
-    data_loss = torch.mean((t_pred - t_true) ** 2)
-    residual = seb_residual(t_pred, features)
-    physics_loss = torch.mean(residual ** 2)
+def physics_residual(t_pred_kelvin, phys):
+    """SEB residual [W m^-2] for predicted temperatures given raw (unstandardised) drivers.
+
+    `phys` is a dict of tensors: ndvi, albedo, s_down, t_air, rh, wind — in physical units.
+    """
+    return seb_residual(t_pred_kelvin,
+                        ndvi=phys["ndvi"], albedo=phys["albedo"], s_down=phys["s_down"],
+                        t_air=phys["t_air"], rh=phys["rh"], wind=phys["wind"])
+
+
+def composite_loss(pred_scaled, target_scaled, phys, scaler, lambda_physics):
+    """Data MSE (standardised) + lambda * normalised SEB-residual MSE.
+
+    Returns (total, data_loss, physics_loss, mean_abs_residual_W_m2).
+    """
+    data_loss = torch.mean((pred_scaled - target_scaled) ** 2)
+
+    # back to Kelvin so the physics sees real temperatures
+    t_pred_k = pred_scaled.squeeze(-1) * scaler["y_std"] + scaler["y_mean"]
+    res = physics_residual(t_pred_k, phys)
+    physics_loss = torch.mean((res / FLUX_SCALE) ** 2)
+
     total = data_loss + lambda_physics * physics_loss
-    return total, data_loss, physics_loss
+    return total, data_loss, physics_loss, res.abs().mean().detach()
