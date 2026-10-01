@@ -22,6 +22,8 @@ import base64
 import json
 import os
 import sys
+import threading
+import time
 import urllib.request
 
 import ee
@@ -64,7 +66,17 @@ PALETTE = ["313695", "4575b4", "74add1", "abd9e9", "fee090",
 LST_MIN, LST_MAX = 28, 46
 
 
-ROOF_SHARE_DEFAULT = 0.5  # share of built-up area actually treated; adjustable per request
+# Share of BUILT-UP area that is actually roof. Measured per ward by
+# scripts/build_roof_share.py from Open Buildings footprints; this constant is only the fallback
+# for when that file has not been generated. It multiplies every headline number, so the UI
+# exposes it as an adjustable assumption either way.
+ROOF_SHARE_DEFAULT = 0.5
+ROOF_SHARE_PATH = "configs/roof_share_kochi.json"
+
+# Earth Engine signs tile URLs and they expire. A dead URL fails silently — the thermal layer
+# just stops drawing, with no error anywhere — so the URL is re-minted on a timer and on demand
+# via /api/refresh_tiles.
+TILE_TTL_S = 45 * 60
 SCENE_MARGIN = 0.12      # fractional padding around the corporation, for geographic context
 MIN_ASPECT = 1.0         # widen east-west so the map fills a landscape viewport
 TILE_DIM = 1100          # Earth Engine refuses a single thumbnail much above this (HTTP 400)
@@ -150,6 +162,45 @@ def _scene_cache_key(bounds):
     return f"{[round(b, 5) for b in bounds]}|{SAT_GRID}x{TILE_DIM}|{LST_DIM}|{LST_MIN}-{LST_MAX}"
 
 
+_TILE_LOCK = threading.Lock()
+
+
+def _mint_tiles():
+    """(Re-)sign the Earth Engine tile URL for the thermal layer and record when."""
+    with _TILE_LOCK:
+        mapid = S["lst_c"].getMapId({"min": LST_MIN, "max": LST_MAX, "palette": PALETTE})
+        S["lst_tiles"] = mapid["tile_fetcher"].url_format
+        S["lst_tiles_at"] = time.time()
+    return S["lst_tiles"]
+
+
+def _tiles_url():
+    """Current tile URL, re-minted if it is close to expiry."""
+    if "lst_tiles" not in S or time.time() - S.get("lst_tiles_at", 0) > TILE_TTL_S:
+        return _mint_tiles()
+    return S["lst_tiles"]
+
+
+def _load_roof_shares():
+    """Per-ward measured roof share from scripts/build_roof_share.py, if it has been run."""
+    try:
+        with open(ROOF_SHARE_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+        wards = {k: float(v["roof_share"]) for k, v in data.get("wards", {}).items()}
+        city = data.get("city_default")
+        if wards:
+            print(f"Roof share: measured for {len(wards)} wards "
+                  f"(city {city}), source {data.get('source')}")
+            return wards, (float(city) if city else ROOF_SHARE_DEFAULT), True
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        print(f"Could not read {ROOF_SHARE_PATH} ({exc})")
+    print(f"Roof share: no measurement available, using the {ROOF_SHARE_DEFAULT} assumption "
+          f"(run scripts/build_roof_share.py)")
+    return {}, ROOF_SHARE_DEFAULT, False
+
+
 @app.on_event("startup")
 def _startup():
     cfg = load_config(CFG_PATH)
@@ -178,9 +229,22 @@ def _startup():
 
     # Thermal layer as Earth Engine TILES: zoomable with the Mapbox basemap, and it makes
     # startup fast (the stitched static scene is only rendered on demand, as a fallback).
-    mapid = lst_c.getMapId({"min": LST_MIN, "max": LST_MAX, "palette": PALETTE})
-    S["lst_tiles"] = mapid["tile_fetcher"].url_format
+    _mint_tiles()
     print("Earth Engine LST tile layer ready")
+
+    # Data vintage — how many scenes went into the baseline and over what window. A public-sector
+    # tool that shows a number without saying how old it is invites misplaced confidence.
+    try:
+        S["vintage"] = {
+            "n_scenes": int(col.size().getInfo()),
+            "start": cfg["time"]["start"], "end": cfg["time"]["end"],
+            "months": dry,
+            "sensor": "Landsat 8/9 C2 L2 (ST_B10), 30 m",
+        }
+    except Exception as exc:
+        print(f"Could not read scene count ({exc})")
+        S["vintage"] = {"n_scenes": None, "start": cfg["time"]["start"],
+                        "end": cfg["time"]["end"], "months": dry}
 
     S["model"] = PinnModel()
 
@@ -193,6 +257,13 @@ def _startup():
     df["month"] = pd.to_datetime(df["date"]).dt.month
     S["px"] = df
     S["px_by_ward"] = {wid: g.index.to_numpy() for wid, g in df.groupby("ward_id")}
+
+    S["roof_shares"], S["roof_share_city"], S["roof_measured"] = _load_roof_shares()
+
+    dates = pd.to_datetime(df["date"])
+    S["vintage"].update(n_pixels=int(len(df)),
+                        n_observation_dates=int(dates.dt.date.nunique()),
+                        first_date=str(dates.min().date()), last_date=str(dates.max().date()))
 
     agg = df.groupby("ward_id")[INPUT_COLUMNS + ["lst"]].mean()
     agg["npix"] = df.groupby("ward_id").size()
@@ -265,6 +336,8 @@ def _ward_geojson(agg):
                      ndvi=round(float(r.ndvi), 3),
                      albedo=round(float(r.albedo), 3),
                      built_frac=round(float(built_fraction(r.ndvi)), 2),
+                     roof_share=round(float(S["roof_shares"].get(
+                         wid, S["roof_share_city"])), 3),
                      npix=int(r.npix))
         feats.append({"type": "Feature", "geometry": mapping(geom), "properties": p})
     return {"type": "FeatureCollection", "features": feats}
@@ -302,12 +375,35 @@ def meta():
     """Client bootstrap. The Mapbox token is a PUBLIC (pk.) token, intended for browser use —
     it is read from .env (gitignored) rather than committed, and should also be URL-restricted
     in the Mapbox account settings."""
+    rmse = S["metrics"].get("rmse")
+    r2 = S["metrics"].get("r2")
+    n_inert = sum(1 for f in S["wards_geo"]["features"]
+                  if not f["properties"]["has_data"])
     return {"model": S["model"].name, "n_wards": int(len(S["wards"])),
+            "n_wards_total": len(S["wards_geo"]["features"]),
+            "n_wards_no_data": n_inert,
             "city": "Kochi, Kerala", "lst_range": [LST_MIN, LST_MAX],
             "palette": ["#" + c for c in PALETTE],
             "bounds": S["bounds"],
-            "lst_tiles": S["lst_tiles"],
+            "lst_tiles": _tiles_url(),
+            "tile_ttl_s": TILE_TTL_S,
+            "vintage": S.get("vintage", {}),
+            "model_rmse": None if rmse is None or rmse != rmse else round(rmse, 2),
+            "model_r2": None if r2 is None or r2 != r2 else round(r2, 3),
+            "roof_share_default": S["roof_share_city"],
+            "roof_share_measured": S["roof_measured"],
             "mapbox_token": MAPBOX_TOKEN}
+
+
+@app.post("/api/refresh_tiles")
+@app.get("/api/refresh_tiles")
+def refresh_tiles():
+    """Re-sign the Earth Engine tile URL.
+
+    The client calls this when tiles start failing. Without it an expired URL just stops
+    rendering the thermal layer, with nothing in the UI to say why.
+    """
+    return {"lst_tiles": _mint_tiles(), "ttl_s": TILE_TTL_S}
 
 
 class Interventions(BaseModel):
@@ -331,20 +427,40 @@ class AnalyzeRequest(BaseModel):
 SEASONS = {"all": None, "dry": [12, 1, 2], "premonsoon": [3, 4]}
 
 
+def _roof_share_for(frame, iv):
+    """Per-pixel roof share: an explicit user override, else the MEASURED per-ward value.
+
+    Returns (array, label). The label says which source was used, so the UI and the CSV export
+    can state whether a headline number rests on a measurement or on an assumption.
+    """
+    if iv.roof_share is not None:
+        return np.full(len(frame), float(iv.roof_share)), "user"
+    city = S["roof_share_city"]
+    if S["roof_measured"] and "ward_id" in frame:
+        shares = S["roof_shares"]
+        return (frame["ward_id"].map(lambda w: shares.get(w, city))
+                .to_numpy(dtype="float64"), "measured")
+    return np.full(len(frame), city), ("measured_city" if S["roof_measured"] else "assumed")
+
+
 def _pixel_response(frame, iv):
     """Run the PINN on EVERY pixel and return per-pixel arrays (no feature averaging)."""
     feats = {c: frame[c].to_numpy(dtype="float64") for c in INPUT_COLUMNS}
     r = whatif(S["model"], feats,
                albedo_set=iv.albedo_set if iv.albedo_set else None,
                ndvi_delta=iv.ndvi_delta if iv.ndvi_delta else None)
-    share = ROOF_SHARE_DEFAULT if iv.roof_share is None else float(iv.roof_share)
+    share, share_src = _roof_share_for(frame, iv)
     bf = r["built_frac"]
+    # A cool roof only covers the roofs; greening is applied across the built surface.
     coverage = bf * share if iv.albedo_set else bf
     return {
         "t_base": frame["lst"].to_numpy(dtype="float64") - 273.15,   # measured
         "delta_t": r["delta_t"] * coverage,                           # coverage-scaled
         "delta_t_full": r["delta_t"],
         "built_frac": bf,
+        "coverage": coverage,
+        "roof_share": share,
+        "roof_share_source": share_src,
         "seb_residual": r["seb_residual"],
     }
 
@@ -374,9 +490,12 @@ def analyze(req: AnalyzeRequest):
         res = pd.DataFrame({"ward_id": frame.ward_id.to_numpy(),
                             "t_base": out["t_base"], "delta_t": out["delta_t"],
                             "delta_t_full": out["delta_t_full"],
-                            "built_frac": out["built_frac"]})
+                            "built_frac": out["built_frac"],
+                            "coverage": out["coverage"],
+                            "roof_share": out["roof_share"]})
         g = res.groupby("ward_id").mean(numeric_only=True)
         counts = res.groupby("ward_id").size()
+        spread = res.groupby("ward_id")["delta_t"].quantile([0.1, 0.9]).unstack()
 
         items = []
         for wid in ids:
@@ -389,9 +508,14 @@ def analyze(req: AnalyzeRequest):
                           "t_new": round(float(r.t_base + r.delta_t), 2),
                           "delta_t": round(float(r.delta_t), 2),
                           "delta_t_full": round(float(r.delta_t_full), 2),
+                          "delta_t_p10": round(float(spread.loc[wid, 0.1]), 2),
+                          "delta_t_p90": round(float(spread.loc[wid, 0.9]), 2),
                           "built_frac": round(float(r.built_frac), 2),
+                          "roof_share": round(float(r.roof_share), 3),
+                          "treated_sqkm": round(float((a or 0) * r.coverage), 4),
                           "npix": int(counts.loc[wid])})
         area = float(np.nansum([i["area_sqkm"] or 0 for i in items]))
+        all_dt = res["delta_t"].to_numpy(dtype="float64")
 
     elif sel.kind == "bbox":
         if not sel.bounds or len(sel.bounds) != 4:
@@ -414,12 +538,17 @@ def analyze(req: AnalyzeRequest):
         out = _pixel_response(frame, iv)
 
         area = len(frame) * 900 / 1e6
+        all_dt = out["delta_t"]
         items = [{"ward_id": "area", "name": "Drawn area", "area_sqkm": round(area, 3),
                   "t_base": round(float(np.mean(out["t_base"])), 2),
                   "t_new": round(float(np.mean(out["t_base"] + out["delta_t"])), 2),
                   "delta_t": round(float(np.mean(out["delta_t"])), 2),
                   "delta_t_full": round(float(np.mean(out["delta_t_full"])), 2),
+                  "delta_t_p10": round(float(np.percentile(all_dt, 10)), 2),
+                  "delta_t_p90": round(float(np.percentile(all_dt, 90)), 2),
                   "built_frac": round(float(np.mean(out["built_frac"])), 2),
+                  "roof_share": round(float(np.mean(out["roof_share"])), 3),
+                  "treated_sqkm": round(float(area * np.mean(out["coverage"])), 4),
                   "npix": int(len(frame))}]
     else:
         raise HTTPException(400, f"unknown selection kind '{sel.kind}'")
@@ -429,46 +558,99 @@ def analyze(req: AnalyzeRequest):
     wsum = weights.sum()
     mean_dt = float(np.average(dts, weights=weights) if wsum else dts.mean())
     rmse = S["metrics"].get("rmse")
+
+    # BUDGET / COST-EFFECTIVENESS.
+    #   treated_area_sqkm  the surface actually coated or planted (built fraction x roof share),
+    #                      which is what an intervention is costed on.
+    #   cooling_k_km2      total cooling delivered, sum(dT_i * area_i) in K.km^2. An extensive
+    #                      quantity: a big ward cooled a little can beat a small ward cooled a lot.
+    #   cooling_per_treated_km2  the ratio of the two — K.km^2 of cooling bought per km^2 treated.
+    #                      This is the figure to compare strategies on, because it is independent
+    #                      of how much area a selection happens to contain.
+    # (The previous `cooling_per_km2` was mean_dT * area, which is K.km^2 — a TOTAL, despite the
+    #  name. It is kept below under the correct name and no longer labelled "per km2".)
+    treated = float(np.nansum([i.get("treated_sqkm") or 0 for i in items]))
+    cooling_k_km2 = float(np.nansum([(i["delta_t"] * (i["area_sqkm"] or 0)) for i in items]))
+
+    # UNCERTAINTY. Two different things, deliberately not combined:
+    #   spread  p10-p90 of dT ACROSS PIXELS — real spatial heterogeneity within the selection.
+    #   rmse    the deployed checkpoint's held-out error on absolute LST. dT is a difference of
+    #           two predictions from the same model, so this over-states the error on dT, but it
+    #           is the honest published figure and is labelled as model error, not as a dT band.
+    p10 = float(np.percentile(all_dt, 10)) if len(all_dt) else float("nan")
+    p90 = float(np.percentile(all_dt, 90)) if len(all_dt) else float("nan")
+
+    shares = np.array([i.get("roof_share", 0) for i in items], dtype="float64")
     return {
         "items": sorted(items, key=lambda x: x["delta_t"]),
         "summary": {
             "n": len(items),
             "area_sqkm": round(float(area), 2),
+            "treated_area_sqkm": round(treated, 3),
             "mean_t_base": round(float(np.mean([i["t_base"] for i in items])), 2),
             "mean_delta_t": round(mean_dt, 2),
+            "delta_t_p10": round(p10, 2),
+            "delta_t_p90": round(p90, 2),
             "best_delta_t": round(float(dts.min()), 2),
             "best_name": items[int(np.argmin(dts))]["name"],
-            "cooling_per_km2": round(float(mean_dt * area), 2) if area else None,
+            "cooling_k_km2": round(cooling_k_km2, 3),
+            "cooling_per_treated_km2": round(cooling_k_km2 / treated, 2) if treated else None,
             "no_change": no_change,
             "model": S["model"].name,
             "model_rmse": None if rmse is None or rmse != rmse else round(rmse, 2),
             "season": req.season or "all",
-            "roof_share": ROOF_SHARE_DEFAULT if iv.roof_share is None else iv.roof_share,
+            "roof_share": round(float(shares.mean()), 3) if len(shares) else None,
+            "roof_share_source": out["roof_share_source"],
+            "n_pixels": int(len(all_dt)),
         },
     }
 
 
 @app.post("/api/rank")
 def rank(req: AnalyzeRequest):
-    """Prioritisation: score EVERY ward, so a planner can answer 'where do we start?'."""
+    """Prioritisation: score EVERY ward, so a planner can answer 'where do we start?'.
+
+    Three orderings are returned per ward rather than one composite score, because they answer
+    genuinely different questions and a single blended number would hide which one is driving
+    the ranking:
+
+        t_base                   where is it hottest now (severity)
+        delta_t                  where does this intervention cool most (effectiveness)
+        cooling_per_treated_km2  how much cooling per km2 of roof actually treated
+                                 (cost-effectiveness — the one a budget conversation needs)
+    """
     iv = req.interventions
     frame = _season_frame(req.season)
     out = _pixel_response(frame, iv)
     res = pd.DataFrame({"ward_id": frame.ward_id.to_numpy(),
                         "t_base": out["t_base"], "delta_t": out["delta_t"],
-                        "built_frac": out["built_frac"]})
+                        "built_frac": out["built_frac"],
+                        "coverage": out["coverage"], "roof_share": out["roof_share"]})
     g = res.groupby("ward_id").mean(numeric_only=True)
+    counts = res.groupby("ward_id").size()
     geo = {f["properties"]["ward_id"]: f["properties"] for f in S["wards_geo"]["features"]}
 
     rows = []
     for wid, r in g.iterrows():
         p = geo.get(wid, {})
+        area = p.get("area_sqkm") or 0.0
+        treated = float(area * r.coverage)
+        delivered = float(r.delta_t * area)
         rows.append({"ward_id": wid, "name": p.get("ward_name", wid),
                      "area_sqkm": p.get("area_sqkm"),
                      "t_base": round(float(r.t_base), 2),
                      "delta_t": round(float(r.delta_t), 2),
-                     "built_frac": round(float(r.built_frac), 2)})
-    return {"items": rows, "season": req.season or "all"}
+                     "built_frac": round(float(r.built_frac), 2),
+                     "roof_share": round(float(r.roof_share), 3),
+                     "treated_sqkm": round(treated, 4),
+                     "cooling_k_km2": round(delivered, 3),
+                     "cooling_per_treated_km2": (round(delivered / treated, 2)
+                                                 if treated > 1e-9 else None),
+                     "npix": int(counts.loc[wid])})
+    rmse = S["metrics"].get("rmse")
+    return {"items": rows, "season": req.season or "all",
+            "roof_share_source": out["roof_share_source"],
+            "model_rmse": None if rmse is None or rmse != rmse else round(rmse, 2)}
 
 
 @app.post("/api/export")
@@ -477,16 +659,28 @@ def export_csv(req: AnalyzeRequest):
     from fastapi.responses import PlainTextResponse
     res = analyze(req)
     iv = req.interventions
+    sm = res["summary"]
+    v = S.get("vintage", {})
     head = (f"# UrbanHeat Planner scenario\n"
-            f"# model,{res['summary']['model']}\n"
-            f"# season,{res['summary']['season']}\n"
+            f"# exported,{time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"# model,{sm['model']}\n"
+            f"# model_rmse_K,{sm.get('model_rmse')}\n"
+            f"# season,{sm['season']}\n"
             f"# albedo_set,{iv.albedo_set or ''}\n"
             f"# ndvi_delta,{iv.ndvi_delta or ''}\n"
-            f"# roof_share,{res['summary']['roof_share']}\n"
-            f"# model_rmse_K,{res['summary'].get('model_rmse')}\n"
-            f"# NOTE baseline LST is measured Landsat; delta_t is model response, coverage-scaled\n")
-    cols = ["ward_id", "name", "area_sqkm", "npix", "t_base", "t_new",
-            "delta_t", "delta_t_full", "built_frac"]
+            f"# roof_share,{sm['roof_share']}\n"
+            f"# roof_share_source,{sm['roof_share_source']}\n"
+            f"# baseline_sensor,{v.get('sensor', 'Landsat 8/9')}\n"
+            f"# baseline_window,{v.get('start', '')} to {v.get('end', '')}\n"
+            f"# baseline_scenes,{v.get('n_scenes', '')}\n"
+            f"# selection_pixels,{sm.get('n_pixels', '')}\n"
+            f"# treated_area_sqkm,{sm.get('treated_area_sqkm')}\n"
+            f"# cooling_K_km2_total,{sm.get('cooling_k_km2')}\n"
+            f"# cooling_per_treated_km2,{sm.get('cooling_per_treated_km2')}\n"
+            f"# NOTE baseline LST is measured Landsat; delta_t is model response, coverage-scaled\n"
+            f"# NOTE delta_t_p10/p90 are the spread ACROSS PIXELS, not a model error bar\n")
+    cols = ["ward_id", "name", "area_sqkm", "treated_sqkm", "npix", "t_base", "t_new",
+            "delta_t", "delta_t_p10", "delta_t_p90", "delta_t_full", "built_frac", "roof_share"]
     lines = [",".join(cols)]
     for i in res["items"]:
         lines.append(",".join(f'"{i.get(c, "")}"' if c == "name" else str(i.get(c, ""))

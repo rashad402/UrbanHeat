@@ -42,7 +42,12 @@ from models import sebal as S
 DEFAULT_CKPT = os.environ.get("PINN_CKPT", "models/checkpoints/pinn_lambda0.5.pt")
 DEFAULT_SCALER = os.environ.get("PINN_SCALER", "models/checkpoints/scaler.json")
 
-ROOF_SHARE = 0.5            # fraction of built-up area that is roof
+# Fraction of built-up area that is roof. This multiplies every reported delta_t, so it is an
+# ASSUMPTION WITH TEETH, not a detail. scripts/build_roof_share.py measures it per ward from
+# Open Buildings footprints and api/planner.py uses those values; this constant is the fallback
+# for callers that have no ward context (api/main.py, api/live_demo.py) and when that file has
+# not been generated. Override with the ROOF_SHARE environment variable.
+ROOF_SHARE = float(os.environ.get("ROOF_SHARE", 0.5))
 PHYS_COLUMNS = ["ndvi", "albedo", "s_down", "t_air", "rh", "wind"]
 
 
@@ -90,19 +95,23 @@ def seb_residual_of(t_k, feats):
     return np.abs(np.asarray(r))
 
 
-def whatif(model, feats, albedo_set=None, ndvi_delta=None):
+def whatif(model, feats, albedo_set=None, ndvi_delta=None, roof_share=None):
     """Run base and counterfactual inference.
 
     Returns a dict of arrays: t_base, t_new, delta_t (full-surface),
     delta_t_applied (coverage-scaled), built_frac, seb_residual.
+
+    `roof_share` may be a scalar or a per-pixel array, letting api/planner.py pass the MEASURED
+    per-ward value instead of the module default.
     """
     t0 = model.predict_k(feats)
     mod = apply_intervention(feats, albedo_set, ndvi_delta)
     t1 = model.predict_k(mod)
     d = t1 - t0
 
+    share = ROOF_SHARE if roof_share is None else np.asarray(roof_share, dtype="float64")
     bf = built_fraction(feats["ndvi"])
-    coverage = bf * ROOF_SHARE if albedo_set is not None else bf
+    coverage = bf * share if albedo_set is not None else bf
     return {
         "t_base": t0,
         "t_new": t1,
