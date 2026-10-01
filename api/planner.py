@@ -64,6 +64,7 @@ PALETTE = ["313695", "4575b4", "74add1", "abd9e9", "fee090",
 LST_MIN, LST_MAX = 28, 46
 
 
+ROOF_SHARE_DEFAULT = 0.5  # share of built-up area actually treated; adjustable per request
 SCENE_MARGIN = 0.12      # fractional padding around the corporation, for geographic context
 MIN_ASPECT = 1.0         # widen east-west so the map fills a landscape viewport
 TILE_DIM = 1100          # Earth Engine refuses a single thumbnail much above this (HTTP 400)
@@ -182,13 +183,40 @@ def _startup():
     print("Earth Engine LST tile layer ready")
 
     S["model"] = PinnModel()
+
+    # Keep the PER-PIXEL table. The model is non-linear, so averaging features and predicting
+    # once (f(mean x)) is not the same as predicting per pixel and averaging (mean f(x)) —
+    # Jensen's inequality. A half-park/half-concrete ward analysed as "uniformly semi-built"
+    # understates the benefit of treating the built half. All analysis runs per pixel.
     df = pd.read_parquet(PARQUET)
-    df = df[df.ward_id.notna()]
+    df = df[df.ward_id.notna()].reset_index(drop=True)
+    df["month"] = pd.to_datetime(df["date"]).dt.month
+    S["px"] = df
+    S["px_by_ward"] = {wid: g.index.to_numpy() for wid, g in df.groupby("ward_id")}
+
     agg = df.groupby("ward_id")[INPUT_COLUMNS + ["lst"]].mean()
     agg["npix"] = df.groupby("ward_id").size()
     S["wards"] = agg
     S["wards_geo"] = _ward_geojson(agg)
-    print(f"Planner ready - model {S['model'].name}, {len(agg)} wards with data")
+
+    S["metrics"] = _model_metrics(S["model"].name)
+    print(f"Planner ready - model {S['model'].name}, {len(agg)} wards, "
+          f"{len(df):,} pixels, RMSE {S['metrics'].get('rmse', float('nan')):.2f} K")
+
+
+def _model_metrics(ckpt_name):
+    """Test-set error of the deployed checkpoint, so the UI can show honest uncertainty."""
+    path = "docs/figures/pinn_results.json"
+    lam = (ckpt_name.split("lambda")[-1].replace(".pt", "") if "lambda" in ckpt_name else None)
+    try:
+        res = json.load(open(path, encoding="utf-8"))
+        for name, m in res.items():
+            if lam and f"lam={lam}" in name.replace(" ", ""):
+                return {"rmse": float(m["rmse"]), "r2": float(m["r2"]),
+                        "seb_residual": float(m.get("abs_residual", float("nan")))}
+    except Exception:
+        pass
+    return {"rmse": float("nan"), "r2": float("nan")}
 
 
 def _render_scene(s2, lst_c, region, key):
@@ -285,6 +313,7 @@ def meta():
 class Interventions(BaseModel):
     albedo_set: float | None = None       # cool roof target albedo
     ndvi_delta: float | None = None       # greening / canopy, NDVI increase
+    roof_share: float | None = None       # fraction of built area actually treated
 
 
 class Selection(BaseModel):
@@ -296,48 +325,72 @@ class Selection(BaseModel):
 class AnalyzeRequest(BaseModel):
     selection: Selection
     interventions: Interventions
+    season: str | None = None              # "all" | "dry" | "premonsoon"
 
 
-def _run(feats, iv, observed_c, areas=None):
+SEASONS = {"all": None, "dry": [12, 1, 2], "premonsoon": [3, 4]}
+
+
+def _pixel_response(frame, iv):
+    """Run the PINN on EVERY pixel and return per-pixel arrays (no feature averaging)."""
+    feats = {c: frame[c].to_numpy(dtype="float64") for c in INPUT_COLUMNS}
     r = whatif(S["model"], feats,
                albedo_set=iv.albedo_set if iv.albedo_set else None,
                ndvi_delta=iv.ndvi_delta if iv.ndvi_delta else None)
-    d_applied = r["delta_t_applied"]
+    share = ROOF_SHARE_DEFAULT if iv.roof_share is None else float(iv.roof_share)
+    bf = r["built_frac"]
+    coverage = bf * share if iv.albedo_set else bf
     return {
-        "t_base": observed_c,
-        "t_new": observed_c + d_applied,
-        "delta_t": d_applied,
+        "t_base": frame["lst"].to_numpy(dtype="float64") - 273.15,   # measured
+        "delta_t": r["delta_t"] * coverage,                           # coverage-scaled
         "delta_t_full": r["delta_t"],
-        "built_frac": r["built_frac"],
+        "built_frac": bf,
         "seb_residual": r["seb_residual"],
     }
+
+
+def _season_frame(season):
+    df = S["px"]
+    months = SEASONS.get(season or "all")
+    return df if not months else df[df.month.isin(months)]
 
 
 @app.post("/api/analyze")
 def analyze(req: AnalyzeRequest):
     sel, iv = req.selection, req.interventions
     no_change = not (iv.albedo_set or iv.ndvi_delta)
+    geo = {f["properties"]["ward_id"]: f["properties"] for f in S["wards_geo"]["features"]}
 
     if sel.kind == "wards":
-        ids = [w for w in (sel.ward_ids or []) if w in S["wards"].index]
+        ids = [w for w in (sel.ward_ids or []) if w in S["px_by_ward"]]
         if not ids:
             raise HTTPException(400, "no selected wards have measured data")
-        sub = S["wards"].loc[ids]
-        feats = {c: sub[c].to_numpy() for c in INPUT_COLUMNS}
-        observed = sub.lst.to_numpy() - 273.15
-        out = _run(feats, iv, observed)
+        frame = _season_frame(req.season)
+        frame = frame[frame.ward_id.isin(ids)]
+        if frame.empty:
+            raise HTTPException(422, "no pixels for that season in the selected wards")
 
-        geo = {f["properties"]["ward_id"]: f["properties"] for f in S["wards_geo"]["features"]}
+        out = _pixel_response(frame, iv)                 # per pixel, then aggregate
+        res = pd.DataFrame({"ward_id": frame.ward_id.to_numpy(),
+                            "t_base": out["t_base"], "delta_t": out["delta_t"],
+                            "delta_t_full": out["delta_t_full"],
+                            "built_frac": out["built_frac"]})
+        g = res.groupby("ward_id").mean(numeric_only=True)
+        counts = res.groupby("ward_id").size()
+
         items = []
-        for i, wid in enumerate(ids):
-            p = geo.get(wid, {})
-            items.append({"ward_id": wid, "name": p.get("ward_name", wid),
-                          "area_sqkm": p.get("area_sqkm"),
-                          "t_base": round(float(out["t_base"][i]), 2),
-                          "t_new": round(float(out["t_new"][i]), 2),
-                          "delta_t": round(float(out["delta_t"][i]), 2),
-                          "delta_t_full": round(float(out["delta_t_full"][i]), 2),
-                          "built_frac": round(float(out["built_frac"][i]), 2)})
+        for wid in ids:
+            if wid not in g.index:
+                continue
+            r, p = g.loc[wid], geo.get(wid, {})
+            a = p.get("area_sqkm")
+            items.append({"ward_id": wid, "name": p.get("ward_name", wid), "area_sqkm": a,
+                          "t_base": round(float(r.t_base), 2),
+                          "t_new": round(float(r.t_base + r.delta_t), 2),
+                          "delta_t": round(float(r.delta_t), 2),
+                          "delta_t_full": round(float(r.delta_t_full), 2),
+                          "built_frac": round(float(r.built_frac), 2),
+                          "npix": int(counts.loc[wid])})
         area = float(np.nansum([i["area_sqkm"] or 0 for i in items]))
 
     elif sel.kind == "bbox":
@@ -345,52 +398,100 @@ def analyze(req: AnalyzeRequest):
             raise HTTPException(400, "bbox selection needs bounds [w,s,e,n]")
         w, s, e, n = sel.bounds
         region = ee.Geometry.Rectangle([w, s, e, n])
-        stats = S["feat"].reduceRegion(
-            reducer=ee.Reducer.mean().combine(ee.Reducer.count(), sharedInputs=True),
-            geometry=region, scale=30, maxPixels=1e8).getInfo()
-        if stats.get("lst_c_mean") is None:
+        # Sample ACTUAL pixels rather than reducing to a mean feature vector first.
+        fc = S["feat"].sample(region=region, scale=30, numPixels=600,
+                              seed=1, dropNulls=True, geometries=False).getInfo()
+        rows = [f["properties"] for f in fc.get("features", [])]
+        rows = [r for r in rows if r.get("lst") is not None]
+        if not rows:
             raise HTTPException(422, "No land pixels in that area (water, cloud, or outside the city).")
 
-        def v(k, d):
-            x = stats.get(k)
-            return d if x is None else x
+        frame = pd.DataFrame(rows)
+        for c in INPUT_COLUMNS:
+            if c not in frame:
+                frame[c] = {"lon": (w + e) / 2, "lat": (s + n) / 2}.get(c, 0.0)
+        frame = frame.dropna(subset=[c for c in INPUT_COLUMNS if c in frame] + ["lst"])
+        out = _pixel_response(frame, iv)
 
-        feats = {"lon": np.array([(w + e) / 2]), "lat": np.array([(s + n) / 2]),
-                 "ndvi": np.array([v("ndvi_mean", 0.3)]), "ndbi": np.array([v("ndbi_mean", 0.0)]),
-                 "albedo": np.array([v("albedo_mean", 0.13)]),
-                 "s_down": np.array([v("s_down_mean", 642.0)]),
-                 "t_air": np.array([v("t_air_mean", 301.8)]),
-                 "rh": np.array([v("rh_mean", 67.0)]),
-                 "wind": np.array([v("wind_mean", 1.2)])}
-        observed = np.array([stats["lst_c_mean"]])
-        out = _run(feats, iv, observed)
-        npix = int(v("lst_c_count", 0))
-        area = npix * 900 / 1e6
+        area = len(frame) * 900 / 1e6
         items = [{"ward_id": "area", "name": "Drawn area", "area_sqkm": round(area, 3),
-                  "t_base": round(float(out["t_base"][0]), 2),
-                  "t_new": round(float(out["t_new"][0]), 2),
-                  "delta_t": round(float(out["delta_t"][0]), 2),
-                  "delta_t_full": round(float(out["delta_t_full"][0]), 2),
-                  "built_frac": round(float(out["built_frac"][0]), 2)}]
+                  "t_base": round(float(np.mean(out["t_base"])), 2),
+                  "t_new": round(float(np.mean(out["t_base"] + out["delta_t"])), 2),
+                  "delta_t": round(float(np.mean(out["delta_t"])), 2),
+                  "delta_t_full": round(float(np.mean(out["delta_t_full"])), 2),
+                  "built_frac": round(float(np.mean(out["built_frac"])), 2),
+                  "npix": int(len(frame))}]
     else:
         raise HTTPException(400, f"unknown selection kind '{sel.kind}'")
 
     dts = np.array([i["delta_t"] for i in items], dtype="float64")
     weights = np.array([(i["area_sqkm"] or 0) for i in items], dtype="float64")
     wsum = weights.sum()
+    mean_dt = float(np.average(dts, weights=weights) if wsum else dts.mean())
+    rmse = S["metrics"].get("rmse")
     return {
         "items": sorted(items, key=lambda x: x["delta_t"]),
         "summary": {
             "n": len(items),
             "area_sqkm": round(float(area), 2),
             "mean_t_base": round(float(np.mean([i["t_base"] for i in items])), 2),
-            "mean_delta_t": round(float(np.average(dts, weights=weights) if wsum else dts.mean()), 2),
+            "mean_delta_t": round(mean_dt, 2),
             "best_delta_t": round(float(dts.min()), 2),
             "best_name": items[int(np.argmin(dts))]["name"],
+            "cooling_per_km2": round(float(mean_dt * area), 2) if area else None,
             "no_change": no_change,
             "model": S["model"].name,
+            "model_rmse": None if rmse is None or rmse != rmse else round(rmse, 2),
+            "season": req.season or "all",
+            "roof_share": ROOF_SHARE_DEFAULT if iv.roof_share is None else iv.roof_share,
         },
     }
+
+
+@app.post("/api/rank")
+def rank(req: AnalyzeRequest):
+    """Prioritisation: score EVERY ward, so a planner can answer 'where do we start?'."""
+    iv = req.interventions
+    frame = _season_frame(req.season)
+    out = _pixel_response(frame, iv)
+    res = pd.DataFrame({"ward_id": frame.ward_id.to_numpy(),
+                        "t_base": out["t_base"], "delta_t": out["delta_t"],
+                        "built_frac": out["built_frac"]})
+    g = res.groupby("ward_id").mean(numeric_only=True)
+    geo = {f["properties"]["ward_id"]: f["properties"] for f in S["wards_geo"]["features"]}
+
+    rows = []
+    for wid, r in g.iterrows():
+        p = geo.get(wid, {})
+        rows.append({"ward_id": wid, "name": p.get("ward_name", wid),
+                     "area_sqkm": p.get("area_sqkm"),
+                     "t_base": round(float(r.t_base), 2),
+                     "delta_t": round(float(r.delta_t), 2),
+                     "built_frac": round(float(r.built_frac), 2)})
+    return {"items": rows, "season": req.season or "all"}
+
+
+@app.post("/api/export")
+def export_csv(req: AnalyzeRequest):
+    """CSV of the current scenario, for committee papers."""
+    from fastapi.responses import PlainTextResponse
+    res = analyze(req)
+    iv = req.interventions
+    head = (f"# UrbanHeat Planner scenario\n"
+            f"# model,{res['summary']['model']}\n"
+            f"# season,{res['summary']['season']}\n"
+            f"# albedo_set,{iv.albedo_set or ''}\n"
+            f"# ndvi_delta,{iv.ndvi_delta or ''}\n"
+            f"# roof_share,{res['summary']['roof_share']}\n"
+            f"# model_rmse_K,{res['summary'].get('model_rmse')}\n"
+            f"# NOTE baseline LST is measured Landsat; delta_t is model response, coverage-scaled\n")
+    cols = ["ward_id", "name", "area_sqkm", "npix", "t_base", "t_new",
+            "delta_t", "delta_t_full", "built_frac"]
+    lines = [",".join(cols)]
+    for i in res["items"]:
+        lines.append(",".join(f'"{i.get(c, "")}"' if c == "name" else str(i.get(c, ""))
+                              for c in cols))
+    return PlainTextResponse(head + "\n".join(lines) + "\n", media_type="text/csv")
 
 
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="planner")
