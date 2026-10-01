@@ -251,6 +251,39 @@ input[type=range]:focus-visible{outline:2px solid var(--accent-bright);outline-o
 .bd-base,.bd-dt{font-family:var(--font-mono);font-size:11.5px}
 .bd-dt{color:var(--accent-bright);font-weight:600}
 
+/* segmented control (season) */
+.segmented{display:flex;gap:2px;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:3px}
+.seg{flex:1;background:none;border:0;color:var(--muted);font-size:11.5px;font-weight:500;
+  padding:6px 4px;border-radius:5px;cursor:pointer}
+.seg:hover{color:var(--fg)}
+.seg.is-active{background:var(--accent);color:var(--accent-ink);font-weight:600}
+
+.kpi-sub{display:block;margin-top:2px;font-size:10px;color:var(--faint);font-family:var(--font-mono)}
+
+/* priority ranking */
+.rank{display:flex;flex-direction:column;max-height:290px;overflow-y:auto;gap:2px}
+.rank-row{
+  display:grid;grid-template-columns:18px 1fr 54px 46px;gap:8px;align-items:center;
+  background:none;border:0;border-radius:6px;padding:6px 7px;cursor:pointer;text-align:left;
+  color:var(--fg-dim);font-size:12px;font-family:inherit;
+}
+.rank-row:hover{background:var(--surface-2);color:var(--fg)}
+.rank-row.is-selected{background:rgba(25,194,168,.14);color:var(--fg)}
+.rank-n{font-family:var(--font-mono);font-size:10.5px;color:var(--faint)}
+.rank-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rank-base,.rank-dt{font-family:var(--font-mono);font-size:11px;text-align:right}
+.rank-dt{color:var(--accent-bright);font-weight:600}
+.rank-empty{color:var(--faint);font-size:12px;padding:4px 0}
+
+/* toast */
+.toast{
+  position:fixed;left:50%;bottom:34px;transform:translateX(-50%);z-index:80;
+  background:var(--surface-3);border:1px solid var(--line);color:var(--fg);
+  padding:9px 15px;border-radius:999px;font-size:12.5px;box-shadow:var(--shadow);max-width:80vw;
+}
+.toast.is-error{border-color:#6b2a26;background:#2a1513;color:#ffb4ac}
+
 /* ───────────── status bar ───────────── */
 .statusbar{
   flex:none;display:flex;align-items:center;gap:7px;flex-wrap:wrap;
@@ -296,4 +329,22 @@ input[type=range]:focus-visible{outline:2px solid var(--accent-bright);outline-o
   .presets{grid-template-columns:1fr 1fr}
   .statusbar{font-size:10px}
   .statusbar .caution{flex-basis:100%}
+}
+
+/* ───────────── print: a clean one-page scenario sheet ───────────── */
+@media print{
+  :root{--bg:#fff;--surface:#fff;--surface-2:#fff;--surface-3:#fff;--fg:#111;
+        --fg-dim:#222;--muted:#555;--faint:#777;--line:#ccc;--line-soft:#e3e3e3;
+        --accent:#0f766e;--accent-bright:#0f766e;--shadow:none}
+  body{overflow:visible;display:block;color:#111;background:#fff}
+  .shell{display:block;min-height:0}
+  .stage{height:auto;min-height:0;page-break-inside:avoid}
+  .map{position:relative;height:420px}
+  .toolbar,.layers,.hint,.box-draw,.toast,.ghost-btn,.link-btn,
+  .mapboxgl-ctrl,.presets,input[type=range],.status-dot{display:none!important}
+  .rail{border:0;max-height:none;overflow:visible;display:block}
+  .panel{break-inside:avoid;border-bottom:1px solid #ddd}
+  .rank{max-height:none;overflow:visible}
+  .statusbar{color:#555;border-top:1px solid #ccc}
+  .kpi{border:1px solid #ccc}
 }

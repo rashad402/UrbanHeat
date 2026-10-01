@@ -86,7 +86,17 @@
     </section>
 
     <section class="panel">
-      <div class="panel-head"><h2>Intervention</h2></div>
+      <div class="panel-head"><h2>Scenario</h2></div>
+
+      <div class="field">
+        <div class="field-head"><label id="seasonLbl">Season</label></div>
+        <div class="segmented" role="radiogroup" aria-labelledby="seasonLbl">
+          <button class="seg is-active" data-season="all" role="radio" aria-checked="true">All year</button>
+          <button class="seg" data-season="dry" role="radio" aria-checked="false">Dry</button>
+          <button class="seg" data-season="premonsoon" role="radio" aria-checked="false">Pre-monsoon</button>
+        </div>
+        <p class="field-note">Pre-monsoon (Mar–Apr) is Kochi's peak heat period.</p>
+      </div>
 
       <div class="presets" id="presets">
         <button class="preset" data-albedo="0.50" data-ndvi="0">Cool roofs</button>
@@ -106,18 +116,27 @@
         <input type="range" id="ndvi" min="0" max="0.4" step="0.01" value="0">
         <p class="field-note">Green roofs, parks and street canopy on built surfaces.</p>
       </div>
+
+      <div class="field">
+        <div class="field-head"><label for="roofShare">Coverage of built area</label><output id="roofShareOut">50%</output></div>
+        <input type="range" id="roofShare" min="0.1" max="1" step="0.05" value="0.5">
+        <p class="field-note">What share of built surface is actually treated. This scales every
+          result — it is an assumption, not a measurement.</p>
+      </div>
     </section>
 
     <section class="panel" id="resultsPanel">
       <div class="panel-head">
         <h2>Predicted impact</h2>
         <span class="status-dot" id="busyDot" hidden></span>
+        <button class="link-btn" id="exportBtn" hidden>Export CSV</button>
       </div>
 
       <div class="kpis">
         <div class="kpi">
           <span class="kpi-label">Mean cooling</span>
           <span class="kpi-value cool" id="kDelta">—</span>
+          <span class="kpi-sub" id="kDeltaErr"></span>
         </div>
         <div class="kpi">
           <span class="kpi-label">Area treated</span>
@@ -145,8 +164,20 @@
         <div id="breakdownRows"></div>
       </div>
     </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Priority wards</h2>
+        <button class="link-btn" id="rankRefresh">Rank all</button>
+      </div>
+      <p class="field-note" id="rankNote" style="margin:0 0 9px">
+        Scores every ward for the current scenario — click to add it to the selection.</p>
+      <div class="rank" id="rankList" role="list"></div>
+    </section>
   </aside>
 </main>
+
+<div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
 
 <footer class="statusbar">
   <span><b>Baseline</b> measured Landsat 8/9 LST, dry season 2015–2026</span>

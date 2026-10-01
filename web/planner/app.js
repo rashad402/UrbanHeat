@@ -23,11 +23,31 @@
     tool: "select",
     bbox: null,
     hovered: null,
-    iv: { albedo: 0, ndvi: 0 },
+    iv: { albedo: 0, ndvi: 0, roofShare: 0.5 },
+    season: "all",
+    rank: [],
     reqId: 0,
   };
 
   const fail = (html) => { $("stageLoading").innerHTML = html; $("stageLoading").hidden = false; };
+
+  let toastTimer = null;
+  function toast(msg, isError) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.classList.toggle("is-error", !!isError);
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 6000 : 3000);
+  }
+
+  const body = () => ({
+    selection: selectionPayload(),
+    interventions: {
+      albedo_set: state.iv.albedo, ndvi_delta: state.iv.ndvi, roof_share: state.iv.roofShare,
+    },
+    season: state.season,
+  });
 
   /* ───────────────────────── boot ───────────────────────── */
   async function boot() {
@@ -213,15 +233,15 @@
       return [e.clientX - r.left, e.clientY - r.top];
     };
 
-    canvas.addEventListener("mousedown", (e) => {
-      if (state.tool !== "draw" || e.button !== 0) return;
+    canvas.addEventListener("pointerdown", (e) => {
+      if (state.tool !== "draw" || (e.pointerType === "mouse" && e.button !== 0)) return;
       e.preventDefault(); e.stopPropagation();
       map.dragPan.disable();
       start = pos(e);
       box.hidden = false;
       Object.assign(box.style, { left: start[0] + "px", top: start[1] + "px", width: "0px", height: "0px" });
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp, { once: true });
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp, { once: true });
     }, true);
 
     function onMove(e) {
@@ -234,7 +254,7 @@
     }
 
     function onUp(e) {
-      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("pointermove", onMove);
       map.dragPan.enable();
       if (!start) return;
       const p = pos(e);
@@ -253,24 +273,33 @@
 
   /* ─────────────────── selection ─────────────────── */
   function setSel(id, on) {
-    state.map.setFeatureState({ source: "wards", id }, { selected: on });
+    // Guarded: if the basemap failed, selection and analysis must still work.
+    const m = state.map;
+    if (!m || !m.getSource || !m.getSource("wards")) return;
+    m.setFeatureState({ source: "wards", id }, { selected: on });
   }
   function clearWardSelection() {
     state.selected.forEach(id => setSel(id, false));
     state.selected.clear();
   }
 
+  function syncRankSelection() {
+    document.querySelectorAll(".rank-row").forEach(b =>
+      b.classList.toggle("is-selected", state.selected.has(b.dataset.id)));
+  }
+
   function toggleWard(id) {
     if (state.bbox) { state.bbox = null; $("boxDraw").hidden = true; }
     if (state.selected.has(id)) { state.selected.delete(id); setSel(id, false); }
     else { state.selected.add(id); setSel(id, true); }
-    renderSelection(); analyze();
+    renderSelection(); syncRankSelection(); analyze();
   }
 
   function clearSelection() {
     clearWardSelection();
     state.bbox = null; $("boxDraw").hidden = true;
-    renderSelection(); resetResults();
+    renderSelection(); syncRankSelection(); resetResults();
+    $("exportBtn").hidden = true;
   }
 
   function renderSelection() {
@@ -328,17 +357,17 @@
     const myId = ++state.reqId;
     $("busyDot").hidden = false;
     try {
-      const body = { selection: sel, interventions: { albedo_set: state.iv.albedo, ndvi_delta: state.iv.ndvi } };
       const res = await api("/api/analyze", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body()),
       });
       if (myId !== state.reqId) return;
       renderResults(res);
+      $("exportBtn").hidden = false;
       if (sel.kind === "wards") runCompare(sel, myId); else $("compare").hidden = true;
     } catch (err) {
       if (myId !== state.reqId) return;
       resetResults();
-      $("kBest").textContent = String(err.message || err);
+      toast(String(err.message || err), true);     // errors belong in a toast, not a KPI tile
     } finally {
       if (myId === state.reqId) $("busyDot").hidden = true;
     }
@@ -347,6 +376,8 @@
   function renderResults(res) {
     const s = res.summary, none = s.no_change;
     $("kDelta").textContent = none ? "—" : s.mean_delta_t.toFixed(2) + " °C";
+    // Honest uncertainty: the deployed model's held-out RMSE, shown alongside the estimate.
+    $("kDeltaErr").textContent = (none || !s.model_rmse) ? "" : `model error ±${s.model_rmse} K`;
     $("kArea").textContent = s.area_sqkm ? s.area_sqkm.toFixed(2) + " km²" : "—";
     $("kTemp").textContent = none ? s.mean_t_base.toFixed(1) + " °C"
       : s.mean_t_base.toFixed(1) + " → " + (s.mean_t_base + s.mean_delta_t).toFixed(1);
@@ -375,7 +406,11 @@
       const out = await Promise.all(STRATEGIES.map(st =>
         api("/api/analyze", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ selection: sel, interventions: { albedo_set: st.albedo_set, ndvi_delta: st.ndvi_delta } }),
+          body: JSON.stringify({
+            selection: sel, season: state.season,
+            interventions: { albedo_set: st.albedo_set, ndvi_delta: st.ndvi_delta,
+                             roof_share: state.iv.roofShare },
+          }),
         }).then(r => r.summary.mean_delta_t).catch(() => 0)));
       if (myId !== state.reqId) return;
       const worst = Math.min(...out, -0.01);
@@ -431,8 +466,82 @@
     }));
     sync();
 
+    // season
+    document.querySelectorAll(".seg").forEach(b => b.addEventListener("click", () => {
+      document.querySelectorAll(".seg").forEach(x => {
+        x.classList.remove("is-active"); x.setAttribute("aria-checked", "false");
+      });
+      b.classList.add("is-active"); b.setAttribute("aria-checked", "true");
+      state.season = b.dataset.season;
+      analyze(); if (state.rank.length) loadRank();
+    }));
+
+    // coverage assumption
+    $("roofShare").addEventListener("input", e => {
+      state.iv.roofShare = +e.target.value;
+      $("roofShareOut").textContent = Math.round(state.iv.roofShare * 100) + "%";
+      analyze();
+    });
+
+    $("rankRefresh").addEventListener("click", loadRank);
+    $("exportBtn").addEventListener("click", exportCsv);
     $("clearSel").addEventListener("click", clearSelection);
     $("aboutBtn").addEventListener("click", () => $("aboutDlg").showModal());
+  }
+
+  /* ─────────────────── prioritisation ─────────────────── */
+  async function loadRank() {
+    $("rankList").innerHTML = `<p class="rank-empty">Scoring all wards…</p>`;
+    try {
+      const res = await api("/api/rank", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selection: { kind: "wards" }, season: state.season,
+          interventions: { albedo_set: state.iv.albedo || 0.5, ndvi_delta: state.iv.ndvi,
+                           roof_share: state.iv.roofShare },
+        }),
+      });
+      state.rank = res.items.sort((a, b) => a.delta_t - b.delta_t);
+      renderRank();
+    } catch (err) {
+      $("rankList").innerHTML = `<p class="rank-empty">Could not rank wards.</p>`;
+      toast(String(err.message || err), true);
+    }
+  }
+
+  function renderRank() {
+    if (!state.rank.length) {
+      $("rankList").innerHTML = `<p class="rank-empty">Press “Rank all”.</p>`;
+      return;
+    }
+    $("rankList").innerHTML = state.rank.map((w, i) => `
+      <button class="rank-row${state.selected.has(w.ward_id) ? " is-selected" : ""}"
+              role="listitem" data-id="${w.ward_id}"
+              title="${w.name} — baseline ${w.t_base}°C, ${Math.round(w.built_frac * 100)}% built-up">
+        <span class="rank-n">${i + 1}</span>
+        <span class="rank-name">${w.name}</span>
+        <span class="rank-base">${w.t_base.toFixed(1)}°</span>
+        <span class="rank-dt">${w.delta_t.toFixed(2)}</span>
+      </button>`).join("");
+    $("rankList").querySelectorAll(".rank-row").forEach(b =>
+      b.addEventListener("click", () => toggleWard(b.dataset.id)));
+  }
+
+  async function exportCsv() {
+    if (!selectionPayload()) return toast("Select an area first.");
+    try {
+      const r = await fetch("/api/export", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body()),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `urbanheat-scenario-${state.season}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast("Scenario exported.");
+    } catch (err) { toast(String(err.message || err), true); }
   }
 
   boot();
