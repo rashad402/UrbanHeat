@@ -34,13 +34,32 @@ notebooks/      exploratory only (never a source of reported results)
 docs/           final report (LaTeX) and figures
 ```
 
+## The planning console
+
+`web/planner/` + `api/planner.py` — the decision-support application for municipal planners.
+Select wards (or draw a custom area), apply cool roofs / greening, and get the predicted land
+surface temperature from the trained PINN.
+
+```bash
+uvicorn api.planner:app --port 8080
+```
+
+Then open **http://localhost:8080** (first start takes ~30 s while Earth Engine renders the scene).
+
+- Baseline LST is **measured** Landsat; the PINN supplies the **response**.
+- The map is a server-rendered Earth Engine scene with an **SVG interaction layer** — no tile or
+  WebGL map library, because those failed to render reliably in the target environment. Zoom and
+  pan are CSS transforms, so imagery and vector overlay stay registered.
+- Deployed checkpoint is **λ=0.5**, not the highest-R² one — see `api/inference.py` for why
+  (counterfactuals are an extrapolation problem).
+
 ## Quick start (Python side)
 
 ```bash
 conda env create -f environment.yml
 conda activate urbanheat
 earthengine authenticate          # requires a (free) Google Earth Engine account
-python data_engine/gee_export.py --config configs/data_config.yaml
+python data_engine/build_dataset.py --config configs/data_config.yaml
 ```
 
 ## Status

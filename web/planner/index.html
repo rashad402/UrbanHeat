@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UrbanHeat Planner — Kochi</title>
+<meta name="description" content="Physics-informed urban heat mitigation planning for Kochi Municipal Corporation.">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 2.5c-.7 3.2-3.2 4.4-3.2 7.4a3.2 3.2 0 0 0 6.4 0c0-3-2.5-4.2-3.2-7.4Z" fill="currentColor" opacity=".9"/>
+      <path d="M5 14.5c1.9 1 3.1 2.6 3.4 4.6M19 14.5c-1.9 1-3.1 2.6-3.4 4.6M12 15.5v6" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+    </svg>
+    <div class="brand-text">
+      <strong>UrbanHeat Planner</strong>
+      <span>Kochi Municipal Corporation</span>
+    </div>
+  </div>
+  <div class="topbar-meta">
+    <span class="chip" id="chipModel" title="Deployed model checkpoint">model …</span>
+    <span class="chip chip-quiet" id="chipWards">… wards</span>
+    <button class="ghost-btn" id="aboutBtn" aria-haspopup="dialog">Method</button>
+  </div>
+</header>
+
+<main class="shell">
+
+  <!-- ───────────────── map stage ───────────────── -->
+  <section class="stage" id="stage" aria-label="Thermal map of Kochi">
+    <div class="viewport" id="viewport">
+      <div class="scene" id="scene">
+        <img id="satImg" alt="Sentinel-2 true-colour imagery of Kochi" draggable="false">
+        <img id="lstImg" alt="Landsat land surface temperature overlay" draggable="false">
+        <svg id="overlay" preserveAspectRatio="none" aria-label="Ward boundaries">
+          <g id="wardLayer"></g>
+          <rect id="drawRect" class="draw-rect" hidden></rect>
+        </svg>
+      </div>
+    </div>
+
+    <div class="stage-loading" id="stageLoading">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Rendering Sentinel-2 and Landsat imagery from Earth Engine…</p>
+    </div>
+
+    <!-- floating toolbar -->
+    <div class="toolbar" role="toolbar" aria-label="Map tools">
+      <button class="tool is-active" data-tool="select" title="Select wards (drag to pan)">
+        <svg viewBox="0 0 16 16"><path d="M3 2.3 12.6 7 8.6 8.6 7 12.6 3 2.3Z" fill="currentColor"/></svg>
+        <span>Select</span>
+      </button>
+      <button class="tool" data-tool="draw" title="Draw a custom area">
+        <svg viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"/></svg>
+        <span>Draw area</span>
+      </button>
+      <span class="tool-sep"></span>
+      <button class="tool icon-only" id="zoomIn" title="Zoom in"><svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+      <button class="tool icon-only" id="zoomOut" title="Zoom out"><svg viewBox="0 0 16 16"><path d="M3.5 8h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+      <button class="tool icon-only" id="zoomReset" title="Reset view"><svg viewBox="0 0 16 16"><path d="M8 3.2A4.8 4.8 0 1 0 12.8 8" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/><path d="M8 1.4v3.4H4.8" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+
+    <!-- layer control -->
+    <div class="layers">
+      <div class="layers-head">Thermal overlay</div>
+      <input type="range" id="opacity" min="0" max="1" step="0.02" value="0.72" aria-label="Thermal overlay opacity">
+      <div class="legend">
+        <div class="legend-bar" id="legendBar"></div>
+        <div class="legend-scale"><span id="legLo">28°C</span><span>land surface temperature</span><span id="legHi">46°C</span></div>
+      </div>
+    </div>
+
+    <div class="hint" id="mapHint">Click wards to build a scenario · drag to pan · scroll to zoom</div>
+  </section>
+
+  <!-- ───────────────── control rail ───────────────── -->
+  <aside class="rail" aria-label="Scenario controls and results">
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Selection</h2>
+        <button class="link-btn" id="clearSel" hidden>Clear</button>
+      </div>
+      <div class="selection" id="selectionBox">
+        <p class="empty">No area selected.<br><span>Click a ward on the map, or use <strong>Draw area</strong> for a custom zone.</span></p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Intervention</h2></div>
+
+      <div class="presets" id="presets">
+        <button class="preset" data-albedo="0.50" data-ndvi="0">Cool roofs</button>
+        <button class="preset" data-albedo="0" data-ndvi="0.20">Street trees</button>
+        <button class="preset" data-albedo="0" data-ndvi="0.30">Green roofs</button>
+        <button class="preset" data-albedo="0.50" data-ndvi="0.25">Combined</button>
+      </div>
+
+      <div class="field">
+        <div class="field-head"><label for="albedo">Cool roof albedo</label><output id="albedoOut">off</output></div>
+        <input type="range" id="albedo" min="0" max="0.6" step="0.01" value="0">
+        <p class="field-note">Reflective coating on rooftops. Typical cool roof reaches 0.50.</p>
+      </div>
+
+      <div class="field">
+        <div class="field-head"><label for="ndvi">Added vegetation (NDVI)</label><output id="ndviOut">off</output></div>
+        <input type="range" id="ndvi" min="0" max="0.4" step="0.01" value="0">
+        <p class="field-note">Green roofs, parks and street canopy on built surfaces.</p>
+      </div>
+    </section>
+
+    <section class="panel" id="resultsPanel">
+      <div class="panel-head">
+        <h2>Predicted impact</h2>
+        <span class="status-dot" id="busyDot" hidden></span>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi">
+          <span class="kpi-label">Mean cooling</span>
+          <span class="kpi-value cool" id="kDelta">—</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">Area treated</span>
+          <span class="kpi-value" id="kArea">—</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">Surface temp</span>
+          <span class="kpi-value" id="kTemp">—</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">Best performing</span>
+          <span class="kpi-value small" id="kBest">—</span>
+        </div>
+      </div>
+
+      <div class="compare" id="compare" hidden>
+        <div class="compare-head">Strategy comparison <span>mean ΔT across selection</span></div>
+        <div id="compareRows"></div>
+      </div>
+
+      <div class="breakdown" id="breakdown" hidden>
+        <div class="breakdown-head">
+          <span>Ward</span><span>Baseline</span><span>ΔT</span>
+        </div>
+        <div id="breakdownRows"></div>
+      </div>
+    </section>
+  </aside>
+</main>
+
+<footer class="statusbar">
+  <span><b>Baseline</b> measured Landsat 8/9 LST, dry season 2015–2026</span>
+  <span class="sep">·</span>
+  <span><b>Imagery</b> Sentinel-2 (ESA) via Google Earth Engine</span>
+  <span class="sep">·</span>
+  <span><b>Wards</b> OpenCity / DataMeet (ODbL)</span>
+  <span class="grow"></span>
+  <span class="caution">Decision support only — verify against local survey before capital commitment.</span>
+</footer>
+
+<dialog id="aboutDlg" class="dlg">
+  <h3>How the prediction works</h3>
+  <p>Baseline land surface temperature is <strong>measured</strong>, not modelled: it is the dry-season
+     median of Landsat 8/9 thermal observations (2015–2026) at 30 m, cloud- and water-masked.</p>
+  <p>The change you see is produced by a <strong>physics-informed neural network</strong>. It is trained
+     on the satellite record but constrained by the surface energy balance
+     (<span class="mono">Rn = G + H + LE</span>), with latent heat estimated independently by
+     Priestley–Taylor so the constraint genuinely binds.</p>
+  <p>That constraint is the point. An intervention pushes inputs far outside the observed range — a cool
+     roof sets albedo about <strong>15 standard deviations</strong> above the training mean. An
+     unconstrained network trained on the same data predicts that a cool roof <em>warms</em> the
+     surface. The physics term is what keeps extrapolation physically valid.</p>
+  <p class="dlg-note">Reported ΔT is scaled to realistic coverage (roofs are a fraction of a ward).
+     Full-surface values are larger and shown per ward.</p>
+  <form method="dialog"><button class="primary-btn">Close</button></form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
