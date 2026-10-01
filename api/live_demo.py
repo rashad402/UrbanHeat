@@ -18,11 +18,13 @@ import base64
 import urllib.request
 
 import ee
+import numpy as np
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from data_engine.build_dataset import load_config, aoi_geometry, build_collection
+from api.inference import PinnModel, whatif as pinn_whatif
 
 CFG = "configs/data_config.yaml"
 app = FastAPI(title="PIML-UrbanHeat live demo")
@@ -97,6 +99,13 @@ def _startup():
     print("Rendering scene thumbnails from Earth Engine...")
     S["sat_b64"] = _fetch_b64(sat_url)
     S["lst_b64"] = _fetch_b64(lst_url)
+
+    try:
+        S["pinn"] = PinnModel()
+        print(f"Loaded trained PINN: {S['pinn'].name}")
+    except Exception as e:                       # fall back to the SEB preview if untrained
+        S["pinn"] = None
+        print(f"No PINN checkpoint ({e}); falling back to the SEB preview model.")
     print(f"Startup done. Scene ready. bounds={S['bounds']}")
 
 
@@ -138,13 +147,35 @@ def query(q: Query):
     s_down = val("s_down_mean", 642.0)
     npix = int(val("lst_c_count", 0) or val("lst_count", 0))
 
-    dT, bf = seb_delta_t(lst_c, ndvi, albedo, s_down, q.cool, q.green, q.canopy)
+    ndvi_delta = (q.green or 0.0) + (q.canopy or 0.0)
+    albedo_set = q.cool if q.cool and q.cool > albedo else None
+
+    if S.get("pinn") is not None:
+        # Trained PINN: observed LST is the measured baseline; the model supplies the RESPONSE.
+        feats = {"lon": np.array([q.lng]), "lat": np.array([q.lat]),
+                 "ndvi": np.array([ndvi]), "ndbi": np.array([ndbi]),
+                 "albedo": np.array([albedo]), "s_down": np.array([s_down]),
+                 "t_air": np.array([val("t_air_mean", 301.8)]),
+                 "rh": np.array([val("rh_mean", 67.0)]),
+                 "wind": np.array([val("wind_mean", 1.2)])}
+        r = pinn_whatif(S["pinn"], feats, albedo_set=albedo_set,
+                        ndvi_delta=ndvi_delta if ndvi_delta > 0 else None)
+        dT = float(r["delta_t_applied"][0])
+        bf = float(r["built_frac"][0])
+        model_used = f"PINN ({S['pinn'].name})"
+        extra = {"delta_t_full_surface": round(float(r["delta_t"][0]), 2),
+                 "seb_residual": round(float(r["seb_residual"][0]), 1),
+                 "t_model_base": round(float(r["t_base"][0] - 273.15), 2)}
+    else:
+        dT, bf = seb_delta_t(lst_c, ndvi, albedo, s_down, q.cool, q.green, q.canopy)
+        model_used, extra = "SEB preview", {}
+
     return {
-        "ok": True,
+        "ok": True, "model": model_used,
         "lst_c": round(lst_c, 2), "after_c": round(lst_c + dT, 2), "delta_t": round(dT, 2),
         "ndvi": round(ndvi, 3), "ndbi": round(ndbi, 3), "albedo": round(albedo, 3),
         "built_frac": round(bf, 2), "npix": npix,
-        "area_m2": round(3.14159 * q.radius ** 2),
+        "area_m2": round(3.14159 * q.radius ** 2), **extra,
     }
 
 
