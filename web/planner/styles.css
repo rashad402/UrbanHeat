@@ -37,6 +37,9 @@
 }
 
 *{box-sizing:border-box}
+/* Author rules like `display:grid` beat the UA's `[hidden]{display:none}`, so an element
+   toggled with el.hidden would stay visible. Make the attribute authoritative. */
+[hidden]{display:none !important}
 html,body{height:100%;margin:0}
 body{
   /* min-height as well as height: a pure height:100% chain collapses to zero if an ancestor
@@ -175,8 +178,8 @@ input[type=range]:focus-visible{outline:2px solid var(--accent-bright);outline-o
 .link-btn{margin-left:auto;background:none;border:0;color:var(--accent-bright);font-size:12px;
   cursor:pointer;padding:0;font-weight:500}
 .link-btn:hover{text-decoration:underline}
-.status-dot{margin-left:auto;width:7px;height:7px;border-radius:50%;background:var(--accent);
-  animation:pulse 1s ease-in-out infinite}
+.status-dot{display:block;margin-left:auto;width:7px;height:7px;border-radius:50%;
+  background:var(--accent);animation:pulse 1s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.25}}
 
 .empty{margin:0;color:var(--fg-dim);font-size:12.5px;line-height:1.6}
