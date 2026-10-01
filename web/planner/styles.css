@@ -313,6 +313,135 @@ input[type=range]:focus-visible{outline:2px solid var(--accent-bright);outline-o
 
 :focus-visible{outline:2px solid var(--accent-bright);outline-offset:2px}
 
+
+/* ───────────── screen-reader only ───────────── */
+.sr-only{
+  position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0;
+}
+
+/* ───────────── layer control additions ───────────── */
+.select{
+  width:100%;margin-top:4px;background:var(--surface-3);color:var(--fg);
+  border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:5px 7px;font-family:inherit;font-size:12px;
+}
+.layers-note{margin:6px 0 0;font-size:10.5px;color:var(--muted);line-height:1.45}
+.legend-inert{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:10.5px;color:var(--muted)}
+.swatch-inert{
+  width:14px;height:10px;border-radius:2px;border:1px dashed var(--faint);
+  background:repeating-linear-gradient(45deg,transparent,transparent 2px,rgba(255,255,255,.16) 2px,rgba(255,255,255,.16) 4px);
+}
+
+/* ───────────── accessible ward list ───────────── */
+.search{
+  width:100%;background:var(--surface-3);color:var(--fg);
+  border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:6px 9px;font-family:inherit;font-size:12.5px;margin-bottom:7px;
+}
+.search::placeholder{color:var(--faint)}
+.wardlist{max-height:188px;overflow:auto;border:1px solid var(--line-soft);border-radius:var(--radius-sm)}
+.wardlist:focus-visible{outline:2px solid var(--accent-bright);outline-offset:1px}
+.ward-row{
+  display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;width:100%;
+  background:none;border:0;border-bottom:1px solid var(--line-soft);color:var(--fg-dim);
+  padding:5px 9px;font-size:12px;text-align:left;cursor:pointer;
+}
+.ward-row:last-child{border-bottom:0}
+.ward-row:hover{background:var(--surface-3)}
+.ward-row.is-cursor{background:var(--surface-3);box-shadow:inset 2px 0 0 var(--accent-bright)}
+.ward-row.is-selected{color:var(--fg)}
+.ward-row.is-selected .ward-name::before{content:"✓ ";color:var(--accent-bright)}
+.ward-row[aria-disabled=true]{color:var(--faint);cursor:not-allowed}
+.ward-row .ward-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ward-row .ward-t{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.ward-row .ward-flag{font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+.panel-hint{font-size:10.5px;color:var(--muted)}
+
+/* ───────────── KPI additions ───────────── */
+.kpi-caveat{
+  margin:8px 0 0;font-size:10.5px;color:var(--muted);line-height:1.5;
+  border-left:2px solid var(--line);padding-left:9px;
+}
+
+/* ───────────── rank sort ───────────── */
+.segmented-sm .seg{padding:4px 0;font-size:11px}
+
+/* ───────────── saved scenarios ───────────── */
+.scenarios{display:flex;flex-direction:column;gap:5px}
+.scen-empty{margin:0;font-size:11.5px;color:var(--muted)}
+.scen-row{
+  display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;
+  background:var(--surface-3);border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:6px 8px;
+}
+.scen-row.is-picked{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.scen-pick{
+  width:17px;height:17px;flex:none;border-radius:4px;border:1px solid var(--line);
+  background:var(--surface);color:var(--accent-ink);font-size:10px;font-weight:700;
+  cursor:pointer;display:grid;place-items:center;
+}
+.scen-row.is-picked .scen-pick{background:var(--accent);border-color:var(--accent)}
+.scen-open{
+  background:none;border:0;color:var(--fg);text-align:left;cursor:pointer;
+  font-size:12px;padding:0;overflow:hidden;
+}
+.scen-open span{display:block;font-size:10px;color:var(--muted);font-family:var(--font-mono)}
+.scen-dt{font-family:var(--font-mono);font-size:12px;color:var(--accent-bright)}
+.scen-del{background:none;border:0;color:var(--faint);cursor:pointer;font-size:14px;padding:0 2px}
+.scen-del:hover{color:var(--hot)}
+.scen-actions{display:flex;gap:6px;margin-top:9px}
+.ghost-btn-sm{padding:2px 7px;font-size:11px}
+
+/* ───────────── A/B comparison ───────────── */
+.diff{margin-top:10px;border-top:1px solid var(--line);padding-top:9px}
+.diff-head{
+  display:flex;justify-content:space-between;align-items:baseline;
+  font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;
+}
+.diff-row{
+  display:grid;grid-template-columns:1fr auto auto auto;gap:8px;
+  font-size:11.5px;padding:3px 0;border-bottom:1px solid var(--line-soft);
+}
+.diff-row:last-child{border-bottom:0}
+.diff-row span:not(:first-child){font-family:var(--font-mono);text-align:right;min-width:52px}
+.diff-row .d-label{color:var(--muted)}
+.diff-row .d-delta.better{color:var(--accent-bright)}
+.diff-row .d-delta.worse{color:var(--warn)}
+.diff-head-row{color:var(--faint);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+
+/* ───────────── onboarding coach marks ───────────── */
+.coach{
+  position:fixed;inset:0;z-index:60;background:rgba(6,5,9,.78);
+  display:grid;place-items:center;padding:20px;
+}
+.coach-card{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:22px 24px;max-width:460px;box-shadow:var(--shadow);
+}
+.coach-card h3{margin:0 0 12px;font-family:var(--font-display);font-size:17px;font-weight:700}
+.coach-steps{margin:0 0 16px;padding-left:20px;font-size:12.5px;color:var(--fg-dim);line-height:1.65}
+.coach-steps li{margin-bottom:8px}
+.coach-steps strong{color:var(--fg)}
+.coach-steps em{color:var(--accent-bright);font-style:normal}
+.coach-actions{display:flex;justify-content:flex-end}
+
+/* ───────────── method dialog facts ───────────── */
+.dlg-facts{
+  margin:0 0 11px;display:grid;grid-template-columns:auto 1fr;gap:3px 12px;
+  font-size:12px;color:var(--fg-dim);
+}
+.dlg-facts dt{color:var(--muted)}
+.dlg-facts dd{margin:0;font-family:var(--font-mono);font-size:11.5px}
+
+/* ───────────── drawn polygon ───────────── */
+.map.is-tracing{cursor:crosshair}
+.hint-trace{display:flex;align-items:center;gap:10px}
+.hint-trace .link-btn{font-size:11px}
+.hint-trace .link-btn[disabled]{opacity:.4;cursor:not-allowed}
+/* A pointer-drawn box or polygon must not also pan or zoom the map on a touch screen. */
+.map.is-drawing,.map.is-tracing{touch-action:none}
+
 /* ───────────── responsive ───────────── */
 @media (max-width:1040px){
   body{overflow:auto}
@@ -341,7 +470,12 @@ input[type=range]:focus-visible{outline:2px solid var(--accent-bright);outline-o
   .stage{height:auto;min-height:0;page-break-inside:avoid}
   .map{position:relative;height:420px}
   .toolbar,.layers,.hint,.box-draw,.toast,.ghost-btn,.link-btn,
-  .mapboxgl-ctrl,.presets,input[type=range],.status-dot{display:none!important}
+  .mapboxgl-ctrl,.presets,input[type=range],.status-dot,
+  .coach,.search,.wardlist,.segmented,.scen-actions,.scen-pick,.scen-del,
+  .select,.legend-inert{display:none!important}
+  .scen-row{grid-template-columns:1fr auto;border:1px solid #ddd}
+  .diff{break-inside:avoid}
+  .kpi-caveat{color:#555}
   .rail{border:0;max-height:none;overflow:visible;display:block}
   .panel{break-inside:avoid;border-bottom:1px solid #ddd}
   .rank{max-height:none;overflow:visible}

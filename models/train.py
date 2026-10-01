@@ -30,9 +30,20 @@ def _phys_tensors(df, device):
 def train_pinn(X_train, y_train_scaled, df_train,
                X_val, y_val_scaled, df_val,
                scaler, lambda_max=0.1, ramp_epochs=40, epochs=200, batch_size=4096,
-               lr=1e-3, patience=20, seed=42, device=None, verbose=True):
+               lr=1e-3, patience=20, seed=42, device=None, verbose=True,
+               X_aug=None, y_aug_scaled=None, df_aug=None, aug_weight=1.0):
     """Train the PINN. Selection is on validation DATA loss, so accuracy is never traded away
-    silently — the physics term shapes the solution but does not choose the checkpoint."""
+    silently — the physics term shapes the solution but does not choose the checkpoint.
+
+    PHYSICS AUGMENTATION (optional). Passing X_aug/y_aug_scaled/df_aug appends the anchored
+    counterfactual samples of models/synthetic.py to the training pool, at `aug_weight` in the
+    data term. They give the DATA term supervision in the high-albedo region the satellite
+    record never visits, which is what lets a small lambda extrapolate correctly — see
+    models/synthetic.py and scripts/run_augmented.py.
+
+    VALIDATION STAYS MEASURED. df_val is untouched, so early stopping and every reported metric
+    are still judged on real observations only.
+    """
     torch.manual_seed(seed)
     np.random.seed(seed)
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -47,6 +58,16 @@ def train_pinn(X_train, y_train_scaled, df_train,
     yv = torch.tensor(y_val_scaled, device=device).view(-1, 1)
     pt = _phys_tensors(df_train, device)
     pv = _phys_tensors(df_val, device)
+    wt = torch.ones(len(Xt), device=device)
+
+    if X_aug is not None and len(X_aug):
+        Xt = torch.cat([Xt, torch.tensor(X_aug, device=device)])
+        yt = torch.cat([yt, torch.tensor(y_aug_scaled, device=device).view(-1, 1)])
+        pa = _phys_tensors(df_aug, device)
+        pt = {k: torch.cat([v, pa[k]]) for k, v in pt.items()}
+        wt = torch.cat([wt, torch.full((len(X_aug),), float(aug_weight), device=device)])
+        if verbose:
+            print(f"    + {len(X_aug):,} physics-generated samples at weight {aug_weight:g}")
 
     n = len(Xt)
     best, best_state, bad = float("inf"), None, 0
@@ -60,7 +81,8 @@ def train_pinn(X_train, y_train_scaled, df_train,
             idx = perm[i:i + batch_size]
             batch_phys = {k: v[idx] for k, v in pt.items()}
             opt.zero_grad()
-            total, _, _, _ = composite_loss(model(Xt[idx]), yt[idx], batch_phys, scaler, lam)
+            total, _, _, _ = composite_loss(model(Xt[idx]), yt[idx], batch_phys, scaler, lam,
+                                            weights=wt[idx])
             total.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             opt.step()

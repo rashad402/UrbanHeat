@@ -47,12 +47,22 @@ def physics_residual(t_pred_kelvin, phys):
                         t_air=phys["t_air"], rh=phys["rh"], wind=phys["wind"])
 
 
-def composite_loss(pred_scaled, target_scaled, phys, scaler, lambda_physics):
+def composite_loss(pred_scaled, target_scaled, phys, scaler, lambda_physics, weights=None):
     """Data MSE (standardised) + lambda * normalised SEB-residual MSE.
+
+    `weights` is an optional per-sample weight on the DATA term only, used to mix measured
+    pixels with the physics-generated samples of models/synthetic.py at a lower weight. The
+    physics term is unweighted: the SEB residual is meaningful for every sample regardless of
+    where its label came from.
 
     Returns (total, data_loss, physics_loss, mean_abs_residual_W_m2).
     """
-    data_loss = torch.mean((pred_scaled - target_scaled) ** 2)
+    sq = (pred_scaled - target_scaled) ** 2
+    if weights is None:
+        data_loss = torch.mean(sq)
+    else:
+        w = weights.view(-1, 1)
+        data_loss = torch.sum(w * sq) / torch.clamp(torch.sum(w), min=1e-8)
 
     # back to Kelvin so the physics sees real temperatures
     t_pred_k = pred_scaled.squeeze(-1) * scaler["y_std"] + scaler["y_mean"]
