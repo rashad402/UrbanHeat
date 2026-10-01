@@ -11,10 +11,15 @@ Models:
                       ONLY. This is the critical ablation: PINN minus the physics term, so the
                       PINN-vs-MLP gap isolates exactly what the SEB physics loss buys.
 
-NOTE ON THE CNN: the proposal lists a CNN baseline. A CNN needs gridded image patches, but our
-dataset is a per-pixel table, so it requires a separate GEE chip export. It is deferred — the
-MLP above is the more informative ablation for the physics-loss claim, since it matches the
-PINN architecture exactly. Add the CNN later for completeness against the proposal.
+  * CNN             - now implemented, in models/cnn.py, over gridded chips from
+                      data_engine/chips.py (dense export: scripts/export_chips.py). It lives
+                      there rather than here because it takes image patches instead of this
+                      module's feature matrix. Run it with scripts/run_cnn.py.
+
+The MLP remains the more informative ablation for the physics-loss claim, since it matches the
+PINN architecture exactly; the CNN answers the separate question of whether spatial context adds
+predictive signal, and demonstrates that extra capacity does NOT fix the counterfactual sign
+error — that needs physics (models/pinn.py) or the missing data (models/synthetic.py).
 """
 
 import numpy as np
