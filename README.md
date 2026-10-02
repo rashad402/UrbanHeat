@@ -90,7 +90,7 @@ python scripts/run_cnn.py --chips data/processed/kochi_chips_p9.npz
 python scripts/build_roof_share.py       # measured roof share per ward, from building footprints
 ```
 
-`scripts/run_augmented.py` is the one to read first. The deployed model trades R² 0.84 → 0.60 for
+`scripts/run_augmented.py` is the one to read first. The deployed model trades R² 0.85 → 0.52 for
 safe extrapolation, and the argument in `models/synthetic.py` is that this trade-off is an
 artefact of a **data gap** (albedo > 0.2 never occurs in the satellite record) rather than a real
 tension. It fills that gap with counterfactuals anchored to real pixels and labelled

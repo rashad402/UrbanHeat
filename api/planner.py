@@ -75,10 +75,15 @@ LST_MIN, LST_MAX = 31, 41
 # and the coastal cells covering southern and western Kochi are masked as sea. Their climate bands
 # are null, and the dataset builder drops any pixel with a null band (dropNulls), so ~20% of the
 # corporation never reached the table even though Landsat covers it fully.
+# Until the ERA5-Land coastal gap was closed this covered 27 wards and the reason was the
+# climate inputs: the 11 km land-sea mask had no land cell over southern and western Kochi, so
+# dropNulls discarded every pixel there (see data_engine/era5.py). That is fixed, and 74 of 77
+# wards now carry data. What is left is a different, smaller problem with a different cause, so
+# the wording no longer blames the climate inputs for it.
 NO_DATA_REASON = (
-    "Outside current model coverage. The climate inputs (ERA5-Land, 11 km) have no land cell "
-    "over this coastal area, so the model has nothing to run on here. This is a data gap, not "
-    "a judgement that the ward has no land."
+    "Outside current model coverage. This ward's boundary polygon returns no pixels at all — "
+    "even sampling a constant image over it comes back empty — which points to a problem with "
+    "the geometry in the source boundary file rather than missing satellite or climate data."
 )
 
 
@@ -644,8 +649,8 @@ def analyze(req: AnalyzeRequest):
         rows = [r for r in rows if r.get("lst") is not None]
         if not rows:
             raise HTTPException(
-                422, "No usable pixels in that area. It may be open water or cloud, or a coastal "
-                     "area the climate inputs do not cover (parts of southern and western Kochi).")
+                422, "No usable pixels in that area. It is most likely open water or was cloudy "
+                     "in every scene — both are masked out of the land-surface record.")
 
         frame = pd.DataFrame(rows)
         for c in INPUT_COLUMNS:

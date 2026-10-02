@@ -63,8 +63,56 @@ def ee_solar_radiation_wm2(overpass_millis):
     return ssrd_now.subtract(ssrd_prev).divide(3600).rename("s_down").max(0)
 
 
-def ee_climate_bands(overpass_millis):
-    """Return an ee.Image with bands [t_air, rh, wind, s_down] at the overpass time."""
+# ---- coastal gap fill ----
+#
+# ERA5-Land carries its own coarse land-sea mask on the ~11 km grid, and over Kochi that mask
+# drops the cells covering the south and west of the corporation — Fort Kochi, Mattancherry,
+# Thevara, Palluruthy, Konthuruthy. Every climate band is null there even though the Landsat
+# scene has tens of thousands of valid land pixels in the same place. build_dataset samples
+# with dropNulls=True, so those pixels were silently discarded and the training table stopped
+# dead at lon 76.25 / lat 9.95 — the exact 0.1 deg cell edges. That cost ~20% of the
+# corporation and left 27 of 77 wards with no data at all.
+#
+# So the bands are extended across those cells from their nearest valid neighbours. At 11 km
+# ERA5-Land cannot resolve intra-city variation in the first place — the module docstring
+# above already calls these near-constant regional forcings — so what filling invents is small
+# beside what dropping a fifth of the city destroyed. Pixels that rely on it are flagged
+# (climate_filled) so the choice stays visible downstream and in the report.
+
+FILL_RADIUS_CELLS = 3      # ~33 km; the coastal gap is 1-3 cells wide
+FILL_PASSES = 2
+
+
+def _fill_masked(img, proj, radius_cells=FILL_RADIUS_CELLS, passes=FILL_PASSES):
+    """Extend `img` over cells its own mask drops, using the mean of valid neighbours.
+
+    Two details matter and both are easy to get wrong:
+
+    1. The kernel is sized in PIXELS, not metres, and the computation is pinned to ERA5's
+       native projection with reproject(). A kernel given in metres is re-expressed at
+       whatever scale the caller requests — build_dataset samples at 30 m, where a 33 km
+       radius becomes a ~1100-pixel kernel that Earth Engine refuses outright.
+    2. skipMasked=False is what makes the reducer run AT a masked pixel using its valid
+       neighbours. With the default (True) the output stays masked and nothing is filled.
+    """
+    names = img.bandNames()
+    kernel = ee.Kernel.circle(radius=radius_cells, units="pixels")
+    out = img.reproject(proj)
+    for _ in range(passes):
+        neighbours = out.reduceNeighborhood(
+            reducer=ee.Reducer.mean(), kernel=kernel, skipMasked=False,
+        ).rename(names).reproject(proj)
+        out = out.unmask(neighbours).reproject(proj)
+    return out
+
+
+def ee_climate_bands(overpass_millis, fill_gaps=True):
+    """Return an ee.Image with bands [t_air, rh, wind, s_down] at the overpass time.
+
+    With fill_gaps (the default) the bands are extended over ERA5-Land's coastal land-sea
+    mask gaps and a 0/1 `climate_filled` band says which pixels needed it. Pass False to see
+    the raw product — that is what the first version of the training table was built on.
+    """
     t = ee.Date(overpass_millis)
     hour_start = ee.Date.fromYMD(t.get("year"), t.get("month"), t.get("day")).advance(t.get("hour"), "hour")
     era = ee.Image(ee.ImageCollection(ERA5_HOURLY)
@@ -78,4 +126,11 @@ def ee_climate_bands(overpass_millis):
     rh = _es_ee(dew).divide(_es_ee(t_air)).multiply(100).clamp(0, 100).rename("rh")
     s_down = ee_solar_radiation_wm2(overpass_millis)                   # W/m^2
 
-    return t_air.addBands([rh, wind, s_down])
+    bands = t_air.addBands([rh, wind, s_down])
+    if not fill_gaps:
+        return bands
+
+    # The flag comes from the ORIGINAL mask, before anything is filled.
+    was_missing = t_air.mask().Not().unmask(1).rename("climate_filled")
+    proj = era.select("temperature_2m").projection()
+    return _fill_masked(bands, proj).addBands(was_missing)

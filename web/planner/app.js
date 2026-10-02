@@ -270,8 +270,10 @@
     if (cov) {
       cov.textContent = inert
         ? `${inert} of ${meta.n_wards_total} wards cannot currently be analysed. ${meta.no_data_reason || ""} `
-          + `Closing the gap means rebuilding the training table with the climate field filled in over `
-          + `coastal cells, then retraining the model.`
+          + `An earlier and much larger gap — 27 wards across southern and western Kochi — had a `
+          + `different cause: ERA5-Land's 11 km land-sea mask left the climate inputs null over the `
+          + `coastal cells, so those pixels were dropped from the training table. That one is closed; `
+          + `the forcing is now interpolated across those cells and the model retrained on it.`
         : "Every ward can be analysed.";
     }
   }
@@ -915,7 +917,8 @@
       if (!p.has_data && !inertHeaderDone) {
         inertHeaderDone = true;
         html += `<div class="ward-group" aria-hidden="true">Outside model coverage · ${inert}
-          <span>A data gap in the climate inputs over this coastal area — not a lack of land.</span></div>`;
+          <span>These boundary polygons return no pixels — a geometry problem in the source
+          file, not a lack of land or data.</span></div>`;
       }
       const name = escapeHtml(p.ward_name);
       html += `

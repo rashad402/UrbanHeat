@@ -4,20 +4,31 @@ Loads the physics-informed checkpoint and serves predictions and counterfactuals
 api/main.py (ward-level) and api/live_demo.py (point/area), so both run on the same model.
 
 CHECKPOINT CHOICE — lambda=0.5, NOT the best in-distribution model
-    In-distribution metrics favour lambda~0.05-0.1 (R2 0.84 vs 0.60). Those metrics are
+    In-distribution metrics favour lambda<=0.1 (R2 0.77-0.80 against 0.52). Those metrics are
     misleading here, because a counterfactual is an EXTRAPOLATION: a cool roof sets albedo to
-    0.50, which is 15.5 standard deviations above the training mean (0.134 +/- 0.024, p99 0.198).
-    Measured on ward feature vectors:
+    0.50, which is 15.6 standard deviations above the training mean (0.133 +/- 0.024).
+    Measured on the 74 ward-mean feature vectors of the rebuilt table (2026-10-02):
 
-        lambda   cool-roof dT   wards cooling   albedo response monotonic
-        0        -0.84 K        52%  (coin flip)   43%
-        0.1      -3.35 K        74%               71%
-        0.3      -4.48 K        82%              100%
-        0.5      -6.17 K       100%              100%
+        lambda  cool-roof dT  worst ward  wards cooling  albedo steps in the WRONG direction
+        0       -2.07 K        +5.20 K     74%           25%
+        0.1     -2.59 K        +4.05 K     77%           19%
+        0.5     -2.27 K        +0.14 K     99%           12%
+        2       -6.11 K        -2.38 K    100%            7%
 
-    The no-physics model predicts a cool roof WARMS the surface by up to 9 K — exactly the
-    "physically impossible output under intervention" the project exists to prevent. Only a
-    strong physics weight makes extrapolation safe, so the deployed model is lambda=0.5.
+    "Worst ward" is the least-cooling ward: a positive value means the model predicts that
+    painting that ward's roofs white HEATS it — exactly the "physically impossible output under
+    intervention" this project exists to prevent. Without a strong physics weight a quarter of
+    the city gets that answer.
+
+    lambda=2 is the only checkpoint with no heating ward at all, and it was considered. It was
+    not chosen because it flattens the vegetation response to -0.47 K against lambda=0.5's
+    -0.62 K and lambda=0.1's -1.37 K. The platform's purpose is COMPARING interventions, and a
+    model that systematically understates greening against cool roofs would bias that comparison
+    in a policy-relevant direction. lambda=0.5 keeps every ward cooling (its one outlier is
+    +0.14 K, neutral within noise) while leaving the strategies comparable.
+
+    NOTE: these numbers replace an earlier table measured on the pre-ERA5-fix dataset, which
+    covered only 50 wards. The conclusion survived the rebuild; the magnitudes did not.
 
     The accuracy cost is acceptable because the BASELINE temperature comes from the measured
     satellite LST, not the model; the model supplies only the RESPONSE (delta_t). Selecting a

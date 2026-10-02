@@ -1,8 +1,8 @@
 """Dataset assembly -> the canonical training table (plan §5.5).
 
-Usage:
-    python data_engine/build_dataset.py --config configs/data_config.yaml
-    python data_engine/build_dataset.py --per-scene 3000 --max-scenes 12
+Usage (as a module — the package uses relative imports, so running the file directly fails):
+    python -m data_engine.build_dataset --config configs/data_config.yaml
+    python -m data_engine.build_dataset --per-scene 3000 --max-scenes 12
 
 Pipeline (per Landsat 8/9 C2 L2 scene over the Kochi AOI, dry season):
     cloud-mask (QA_PIXEL) -> scale SR -> NDVI/NDBI/albedo -> LST[K] from ST_B10
@@ -11,8 +11,12 @@ Pipeline (per Landsat 8/9 C2 L2 scene over the Kochi AOI, dry season):
 Then locally: join ward_id (shapely point-in-polygon), drop physical outliers, write parquet.
 
 Output columns (DATASET CONTRACT):
-    lon, lat, date, ndvi, ndbi, albedo, s_down, t_air, rh, wind, lst, lst_source, ward_id
-(temperatures in KELVIN; lst_source is 'landsat' in v1 — MODIS gap-fill is a later augmentation.)
+    lon, lat, date, ndvi, ndbi, albedo, s_down, t_air, rh, wind, lst, lst_source, ward_id,
+    climate_filled
+(temperatures in KELVIN; lst_source is 'landsat' in v1 — MODIS gap-fill is a later augmentation.
+climate_filled is 1 where the ERA5-Land land-sea mask had no value and the forcing was
+interpolated from neighbouring cells — see data_engine/era5.py. It is NOT a model input; it is
+there so the coastal pixels can be isolated when reporting.)
 
 Notes:
 - Indices are computed from the SAME Landsat scene as the LST target (no cross-sensor time
@@ -31,7 +35,7 @@ from .cloud_mask import mask_landsat_qa
 from .era5 import ee_climate_bands
 
 SCHEMA = ["lon", "lat", "date", "ndvi", "ndbi", "albedo",
-          "s_down", "t_air", "rh", "wind", "lst", "lst_source", "ward_id"]
+          "s_down", "t_air", "rh", "wind", "lst", "lst_source", "ward_id", "climate_filled"]
 
 # Landsat C2 L2 scaling.
 SR_SCALE, SR_OFFSET = 0.0000275, -0.2
@@ -187,6 +191,11 @@ def build(config_path, per_scene=None, max_scenes=None):
     print(f"Ward join: {in_ward}/{len(df)} pixels fell inside a ward polygon")
 
     df["lst_source"] = "landsat"
+    # Sampling returns the flag as a float; keep it small and integral.
+    df["climate_filled"] = df.get("climate_filled", 0).fillna(0).astype("int8")
+    n_filled = int(df.climate_filled.sum())
+    print(f"Climate gap-fill: {n_filled}/{len(df)} rows ({100 * n_filled / max(len(df), 1):.1f}%) "
+          f"use ERA5 forcing interpolated over the coastal land-sea mask")
     df = df[SCHEMA]
 
     out = config["output"]["samples_file"]

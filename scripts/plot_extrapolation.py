@@ -22,6 +22,10 @@ from models import sebal as S                # noqa: E402
 PARQUET = "data/processed/kochi_samples.parquet"
 OUT = "docs/figures/extrapolation.png"
 
+# These must be the lambdas run_pinn.py actually trained on the CURRENT dataset. Loading a
+# checkpoint from an earlier training run against the current scaler.json produces a plausible
+# looking but meaningless curve, which is why the pre-fix checkpoints were moved out of this
+# directory (see models/checkpoints/pre_era5fix/README.md).
 CKPTS = [("mlp_lambda0", "λ=0 (no physics)", "#c02a26"),
          ("pinn_lambda0.1", "λ=0.1", "#b45309"),
          ("pinn_lambda0.5", "λ=0.5 (deployed)", "#0f766e")]
@@ -69,9 +73,8 @@ def main():
     # --- right: how often the direction is right, per ward ---
     wf = {c: w[c].to_numpy() for c in INPUT_COLUMNS}
     labs, pct = [], []
-    for ck, lab, col in [("mlp_lambda0", "λ=0", None), ("pinn_lambda0.05", "λ=0.05", None),
-                         ("pinn_lambda0.1", "λ=0.1", None), ("pinn_lambda0.2", "λ=0.2", None),
-                         ("pinn_lambda0.3", "λ=0.3", None), ("pinn_lambda0.5", "λ=0.5", None)]:
+    for ck, lab, col in [("mlp_lambda0", "λ=0", None), ("pinn_lambda0.1", "λ=0.1", None),
+                         ("pinn_lambda0.5", "λ=0.5", None), ("pinn_lambda2", "λ=2", None)]:
         m = PinnModel(f"models/checkpoints/{ck}.pt")
         t0 = m.predict_k(wf)
         mod = dict(wf); mod["albedo"] = np.maximum(wf["albedo"], 0.50)

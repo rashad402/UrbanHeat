@@ -6,8 +6,13 @@ JS data file the simulator page includes directly (no server / no CORS needed):
 
     web/ward_data.js   ->  window.WARD_DATA (GeoJSON) and window.CLIMATE (scene-mean forcing)
 
-Wards with no land pixels (water-dominated islands/backwaters) fall back to the city-mean LST
-and are flagged has_data=false.
+Wards with no pixels in the table fall back to the city-mean LST and are flagged has_data=false.
+
+That used to be described here as "water-dominated islands/backwaters". It was not: the wards
+without rows were built-up land — Fort Kochi, Mattancherry, Thevara, Palluruthy — and they were
+missing because ERA5-Land's coarse land-sea mask left the climate bands null over the coastal
+cells, which dropNulls then discarded. data_engine/era5.py now fills those cells, so this branch
+should be rare; anything still landing in it needs a real explanation, not an assumption.
 """
 
 import json
