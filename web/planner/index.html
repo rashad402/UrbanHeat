@@ -49,9 +49,13 @@
         <svg viewBox="0 0 16 16"><path d="M3 2.3 12.6 7 8.6 8.6 7 12.6 3 2.3Z" fill="currentColor"/></svg>
         <span>Select</span>
       </button>
-      <button class="tool" data-tool="draw" title="Draw a custom area">
+      <button class="tool" data-tool="draw" title="Drag a rectangle">
         <svg viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"/></svg>
-        <span>Draw area</span>
+        <span>Box</span>
+      </button>
+      <button class="tool" data-tool="polygon" title="Tap or click to trace a zone, then close it">
+        <svg viewBox="0 0 16 16"><path d="M8 2.6 13.4 6.4 11.4 13H4.6L2.6 6.4Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        <span>Zone</span>
       </button>
       <span class="tool-sep"></span>
       <button class="tool icon-only" id="zoomIn" title="Zoom in"><svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
@@ -67,6 +71,19 @@
         <div class="legend-bar" id="legendBar"></div>
         <div class="legend-scale"><span id="legLo">28°C</span><span>land surface temperature</span><span id="legHi">46°C</span></div>
       </div>
+
+      <div class="layers-head" style="margin-top:12px">
+        <label for="choropleth">Colour wards by</label>
+      </div>
+      <select id="choropleth" class="select">
+        <option value="none">Boundaries only</option>
+        <option value="lst">Baseline temperature</option>
+        <option value="delta">Predicted cooling (ΔT)</option>
+      </select>
+      <p class="layers-note" id="choroNote">Ward colour comes from the raster. Choose a mode to
+        shade wards by their own values.</p>
+      <div class="legend-inert"><span class="swatch-inert" aria-hidden="true"></span>
+        <span id="inertNote">hatched = no land pixels</span></div>
     </div>
 
     <div class="hint" id="mapHint">Click wards to build a scenario · drag to pan · scroll to zoom</div>
@@ -83,6 +100,19 @@
       <div class="selection" id="selectionBox">
         <p class="empty">No area selected.<br><span>Click a ward on the map, or use <strong>Draw area</strong> for a custom zone.</span></p>
       </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Wards</h2>
+        <span class="panel-hint" id="wardCount"></span>
+      </div>
+      <!-- Clicking the map is mouse-only. This list is the keyboard and screen-reader route to
+           the same selection: type to filter, arrow keys to move, Enter or Space to toggle. -->
+      <input type="search" id="wardSearch" class="search" placeholder="Filter wards…"
+             autocomplete="off" aria-controls="wardList">
+      <div class="wardlist" id="wardList" role="listbox" aria-multiselectable="true"
+           aria-label="Wards" tabindex="0"></div>
     </section>
 
     <section class="panel">
@@ -118,10 +148,12 @@
       </div>
 
       <div class="field">
-        <div class="field-head"><label for="roofShare">Coverage of built area</label><output id="roofShareOut">50%</output></div>
+        <div class="field-head"><label for="roofShare">Coverage of built area</label>
+          <output id="roofShareOut">measured</output></div>
         <input type="range" id="roofShare" min="0.1" max="1" step="0.05" value="0.5">
-        <p class="field-note">What share of built surface is actually treated. This scales every
-          result — it is an assumption, not a measurement.</p>
+        <p class="field-note" id="roofShareNote">What share of built surface is actually treated.
+          This scales every result.</p>
+        <button class="link-btn" id="roofShareReset" hidden>Back to measured values</button>
       </div>
     </section>
 
@@ -139,18 +171,21 @@
           <span class="kpi-sub" id="kDeltaErr"></span>
         </div>
         <div class="kpi">
-          <span class="kpi-label">Area treated</span>
+          <span class="kpi-label" title="Built surface actually coated or planted">Surface treated</span>
           <span class="kpi-value" id="kArea">—</span>
+          <span class="kpi-sub" id="kAreaSub"></span>
         </div>
         <div class="kpi">
           <span class="kpi-label">Surface temp</span>
           <span class="kpi-value" id="kTemp">—</span>
         </div>
         <div class="kpi">
-          <span class="kpi-label">Best performing</span>
-          <span class="kpi-value small" id="kBest">—</span>
+          <span class="kpi-label" title="Cooling delivered per km² of surface treated — compare strategies on this, not on raw ΔT">Per km² treated</span>
+          <span class="kpi-value small" id="kBudget">—</span>
+          <span class="kpi-sub" id="kBest"></span>
         </div>
       </div>
+      <p class="kpi-caveat" id="kpiCaveat" hidden></p>
 
       <div class="compare" id="compare" hidden>
         <div class="compare-head">Strategy comparison <span>mean ΔT across selection</span></div>
@@ -170,22 +205,71 @@
         <h2>Priority wards</h2>
         <button class="link-btn" id="rankRefresh">Rank all</button>
       </div>
-      <p class="field-note" id="rankNote" style="margin:0 0 9px">
+      <div class="segmented segmented-sm" role="radiogroup" aria-label="Rank wards by">
+        <button class="seg is-active" data-rank="delta" role="radio" aria-checked="true"
+                title="Where this intervention cools most">Cooling</button>
+        <button class="seg" data-rank="t_base" role="radio" aria-checked="false"
+                title="Where it is hottest today">Severity</button>
+        <button class="seg" data-rank="efficiency" role="radio" aria-checked="false"
+                title="Cooling delivered per km² treated">Per km²</button>
+      </div>
+      <p class="field-note" id="rankNote" style="margin:9px 0">
         Scores every ward for the current scenario — click to add it to the selection.</p>
       <div class="rank" id="rankList" role="list"></div>
+    </section>
+
+    <section class="panel" id="scenarioPanel">
+      <div class="panel-head">
+        <h2>Saved scenarios</h2>
+        <button class="link-btn" id="saveScenario">Save current</button>
+      </div>
+      <p class="field-note" style="margin:0 0 9px">
+        Stored in this browser. Pick two to compare, or re-open one to restore its full setup.</p>
+      <div class="scenarios" id="scenarioList"></div>
+      <div class="scen-actions" id="scenActions" hidden>
+        <button class="ghost-btn" id="exportScenarios">Export all (CSV)</button>
+        <button class="ghost-btn" id="printSheet">Print sheet</button>
+      </div>
+      <div class="diff" id="scenarioDiff" hidden>
+        <div class="diff-head"><span id="diffTitle">Comparison</span>
+          <button class="link-btn" id="closeDiff">Close</button></div>
+        <div id="diffRows"></div>
+      </div>
     </section>
   </aside>
 </main>
 
 <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+<p class="sr-only" id="liveRegion" role="status" aria-live="polite"></p>
+
+<!-- One-time coach marks: the two-tool model (Select vs Box/Zone) is not self-evident. -->
+<div class="coach" id="coach" hidden>
+  <div class="coach-card" role="dialog" aria-modal="true" aria-labelledby="coachTitle">
+    <h3 id="coachTitle">Three things to know</h3>
+    <ol class="coach-steps">
+      <li><strong>Select</strong> is the default tool — click wards on the map, or use the
+        <em>Wards</em> list in the panel if you prefer the keyboard.</li>
+      <li><strong>Box</strong> and <strong>Zone</strong> sample a custom area straight from
+        Earth Engine. Zone traces an arbitrary shape; tap each corner, then close it.</li>
+      <li>The baseline temperature is <strong>measured</strong>. Only the change (ΔT) is
+        modelled, and it is scaled to how much surface you actually treat.</li>
+    </ol>
+    <div class="coach-actions">
+      <button class="primary-btn" id="coachDone">Got it</button>
+    </div>
+  </div>
+</div>
 
 <footer class="statusbar">
-  <span><b>Baseline</b> measured Landsat 8/9 LST, dry season 2015–2026</span>
+  <span id="statVintage"><b>Baseline</b> measured Landsat 8/9 LST, dry season</span>
   <span class="sep">·</span>
   <span><b>Imagery</b> Sentinel-2 (ESA) via Google Earth Engine</span>
   <span class="sep">·</span>
   <span><b>Wards</b> OpenCity / DataMeet (ODbL)</span>
+  <span class="sep">·</span>
+  <span id="statModel"><b>Model</b> …</span>
   <span class="grow"></span>
+  <button class="ghost-btn ghost-btn-sm" id="helpBtn" title="Show the intro again">?</button>
   <span class="caution">Decision support only — verify against local survey before capital commitment.</span>
 </footer>
 
@@ -201,6 +285,17 @@
      roof sets albedo about <strong>15 standard deviations</strong> above the training mean. An
      unconstrained network trained on the same data predicts that a cool roof <em>warms</em> the
      surface. The physics term is what keeps extrapolation physically valid.</p>
+  <h3 style="margin-top:18px">What the numbers do and don't tell you</h3>
+  <p>Reported ΔT is scaled to realistic coverage — roofs are a fraction of a ward. The share of
+     built surface treated is shown as an adjustable assumption because it multiplies every
+     result; where building footprints have been measured, the per-ward value is used instead of
+     a flat guess.</p>
+  <p>Two separate uncertainties are reported, and they are <em>not</em> the same thing. The
+     <strong>spread</strong> (p10–p90) is genuine variation between pixels inside your selection.
+     The <strong>model error</strong> is the deployed checkpoint's held-out RMSE on absolute
+     temperature; because ΔT is a difference of two predictions from the same model, that figure
+     over-states the error on ΔT. Neither is a confidence interval on a policy outcome.</p>
+  <dl class="dlg-facts" id="dlgFacts"></dl>
   <p class="dlg-note">Reported ΔT is scaled to realistic coverage (roofs are a fraction of a ward).
      Full-surface values are larger and shown per ward.</p>
   <form method="dialog"><button class="primary-btn">Close</button></form>
