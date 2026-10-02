@@ -20,6 +20,7 @@ api/inference.py for why the deployed checkpoint is lambda=0.5 rather than the h
 
 import base64
 import json
+import math
 import os
 import sys
 import threading
@@ -63,7 +64,22 @@ MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN", "")
 
 PALETTE = ["313695", "4575b4", "74add1", "abd9e9", "fee090",
            "fdae61", "f46d43", "d73027", "a50026"]
-LST_MIN, LST_MAX = 28, 46
+# Colour range of the thermal layer and its legend. This is only the FALLBACK: at startup the range
+# is derived from the data (see _stretch_lst_range). A fixed 28-46 degC span is far wider than the
+# city's real spread, so nearly every land pixel landed in the same orange band and wards were
+# indistinguishable on the map.
+LST_MIN, LST_MAX = 31, 41
+
+# Why a ward can be missing from the model's training table. This is stated to the planner, so it
+# has to be true of the data actually built: ERA5-Land is an 11 km grid with a coarse land-sea mask,
+# and the coastal cells covering southern and western Kochi are masked as sea. Their climate bands
+# are null, and the dataset builder drops any pixel with a null band (dropNulls), so ~20% of the
+# corporation never reached the table even though Landsat covers it fully.
+NO_DATA_REASON = (
+    "Outside current model coverage. The climate inputs (ERA5-Land, 11 km) have no land cell "
+    "over this coastal area, so the model has nothing to run on here. This is a data gap, not "
+    "a judgement that the ward has no land."
+)
 
 
 # Share of BUILT-UP area that is actually roof. Measured per ward by
@@ -185,6 +201,32 @@ def _tiles_url():
     return S["lst_tiles"]
 
 
+def _stretch_lst_range(lst_c, aoi):
+    """Derive the colour range from the composite's own 5th-95th percentile over the city.
+
+    Measured for Kochi: the middle half of all land pixels spans only ~2 degC (36.6-38.6), so any
+    wide range paints most of the city one colour. 5th-95th (~31-41) lets the tails saturate and
+    the genuine hot spots stand out; 2nd-98th (29-43) was too gentle to separate wards.
+
+    Rounded outward to whole degrees so the legend reads cleanly. Any failure falls back to the
+    module defaults rather than blocking startup — the range is presentation, not analysis.
+    """
+    try:
+        r = lst_c.reduceRegion(reducer=ee.Reducer.percentile([5, 95]), geometry=aoi,
+                               scale=60, maxPixels=1e9, bestEffort=True).getInfo()
+        lo, hi = r.get("lst_c_p5"), r.get("lst_c_p95")
+        if lo is None or hi is None:
+            raise ValueError("no percentiles returned")
+        lo, hi = math.floor(lo), math.ceil(hi)
+        if hi - lo < 6:                      # a very flat scene would make the ramp meaningless
+            mid = (lo + hi) / 2
+            lo, hi = math.floor(mid - 3), math.ceil(mid + 3)
+        return int(lo), int(hi)
+    except Exception as exc:
+        print(f"Could not derive the colour range ({exc}); using {LST_MIN}-{LST_MAX}")
+        return LST_MIN, LST_MAX
+
+
 def _load_roof_shares():
     """Per-ward measured roof share from scripts/build_roof_share.py, if it has been run."""
     try:
@@ -230,6 +272,11 @@ def _startup():
                .filterBounds(region).filterDate("2024-01-01", cfg["time"]["end"])
                .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 15)).median())
     S["lst_c"], S["region"] = lst_c, region
+
+    # Colour range from the data, BEFORE the tile URL is signed: the range is baked into it.
+    global LST_MIN, LST_MAX
+    LST_MIN, LST_MAX = _stretch_lst_range(lst_c, aoi)
+    print(f"Thermal colour range {LST_MIN}-{LST_MAX} degC")
 
     # Thermal layer as Earth Engine TILES: zoomable with the Mapbox basemap, and it makes
     # startup fast (the stitched static scene is only rendered on demand, as a fallback).
@@ -321,16 +368,49 @@ def _render_scene(s2, lst_c, region, key):
         print(f"Could not cache scene ({exc})")
 
 
+def _display_names(parts):
+    """Planner-facing name for every ward.
+
+    Six polygons in the DataMeet source carry no name or number (their ids are synthetic: x19,
+    x35, ...). Showing "Ward x35" to a planner is meaningless, and inventing a number would be
+    worse. They are named by their nearest labelled neighbour — "Unnamed ward near Kalvathi" — which
+    is true, locatable, and obviously provisional. ward_id is untouched, so exports and saved
+    scenarios stay stable. Replace with the official KMC names when they are available.
+    """
+    named = [(f["properties"]["ward_name"].strip()[:1].upper() + f["properties"]["ward_name"].strip()[1:], g)
+             for f, g in parts if f["properties"].get("ward_name")]
+    out, used = {}, {}
+    for f, g in parts:
+        p = f["properties"]
+        wid = p["ward_id"]
+        if p.get("ward_name"):
+            nm = p["ward_name"].strip()
+            out[wid] = {"name": nm[:1].upper() + nm[1:], "unnamed": False}   # source has "kaloor South"
+            continue
+        if named:
+            near = min(named, key=lambda ng: (g.distance(ng[1]),
+                                              g.centroid.distance(ng[1].centroid)))[0]
+            base = f"Unnamed ward near {near}"
+        else:
+            base = f"Unnamed ward {wid}"
+        used[base] = used.get(base, 0) + 1
+        out[wid] = {"name": base if used[base] == 1 else f"{base} ({used[base]})", "unnamed": True}
+    return out
+
+
 def _ward_geojson(agg):
     from shapely.geometry import shape, mapping
     gj = json.load(open(WARDS_PATH, encoding="utf-8"))
+    parts = [(f, shape(f["geometry"]).simplify(SIMPLIFY_TOL, preserve_topology=True))
+             for f in gj["features"]]
+    names = _display_names(parts)
     feats = []
-    for f in gj["features"]:
+    for f, geom in parts:
         wid = f["properties"]["ward_id"]
-        geom = shape(f["geometry"]).simplify(SIMPLIFY_TOL, preserve_topology=True)
         has = wid in agg.index
         p = {"ward_id": wid,
-             "ward_name": f["properties"].get("ward_name") or f"Ward {wid}",
+             "ward_name": names[wid]["name"],
+             "unnamed": names[wid]["unnamed"],
              "ward_no": f["properties"].get("ward_no"),
              "area_sqkm": f["properties"].get("area_sqkm"),
              "has_data": bool(has)}
@@ -386,6 +466,7 @@ def meta():
     return {"model": S["model"].name, "n_wards": int(len(S["wards"])),
             "n_wards_total": len(S["wards_geo"]["features"]),
             "n_wards_no_data": n_inert,
+            "no_data_reason": NO_DATA_REASON,
             "city": "Kochi, Kerala", "lst_range": [LST_MIN, LST_MAX],
             "palette": ["#" + c for c in PALETTE],
             "bounds": S["bounds"],
@@ -562,7 +643,9 @@ def analyze(req: AnalyzeRequest):
         rows = [f["properties"] for f in fc.get("features", [])]
         rows = [r for r in rows if r.get("lst") is not None]
         if not rows:
-            raise HTTPException(422, "No land pixels in that area (water, cloud, or outside the city).")
+            raise HTTPException(
+                422, "No usable pixels in that area. It may be open water or cloud, or a coastal "
+                     "area the climate inputs do not cover (parts of southern and western Kochi).")
 
         frame = pd.DataFrame(rows)
         for c in INPUT_COLUMNS:

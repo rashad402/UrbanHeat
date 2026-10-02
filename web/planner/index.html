@@ -10,6 +10,21 @@
 <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>
 <link rel="stylesheet" href="styles.css">
+<script>
+  /* Resolve the theme BEFORE first paint. This has to be inline and synchronous: doing it in
+     app.js — which loads at the end of <body> — paints the light theme first and then flips it,
+     and that flash is at its worst for the person who chose dark deliberately.
+     A stored choice wins; with no stored choice the OS preference decides (app.js keeps
+     following it while the choice is still unset). Storage throws in a private window or with
+     site data blocked, which is not a reason to fail to render. */
+  (() => {
+    let saved = null;
+    try { saved = localStorage.getItem("urbanheat.theme.v1"); } catch { /* unavailable */ }
+    const dark = saved === "dark" || saved === "light" ? saved === "dark"
+      : !!(window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  })();
+</script>
 </head>
 <body>
 
@@ -25,8 +40,22 @@
     </div>
   </div>
   <div class="topbar-meta">
-    <span class="chip" id="chipModel" title="Deployed model checkpoint">model …</span>
-    <span class="chip chip-quiet" id="chipWards">… wards</span>
+    <!-- Shows the theme it switches TO. Both icons ship; styles.css reveals the right one from
+         data-theme, so the button cannot disagree with the live theme. -->
+    <button class="ghost-btn icon-btn" id="themeBtn" aria-pressed="false">
+      <svg class="icon-moon" viewBox="0 0 16 16" aria-hidden="true">
+        <!-- Shifted +0.5,-0.8 from the obvious coordinates: a crescent's bounding box is not
+             centred on the circle it is cut from, so the drawn ink sat low and left of the
+             button's centre even though the <svg> box itself was centred. -->
+        <path d="M13.7 9.5A5.6 5.6 0 0 1 6.6 2.3a5.8 5.8 0 1 0 7.1 7.2Z"
+              fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="8" r="3.1" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M8 1.2v1.6M8 13.2v1.6M1.2 8h1.6M13.2 8h1.6M3.2 3.2l1.1 1.1M11.7 11.7l1.1 1.1M12.8 3.2l-1.1 1.1M4.3 11.7l-1.1 1.1"
+              stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+    </button>
     <button class="ghost-btn" id="aboutBtn" aria-haspopup="dialog">Method</button>
   </div>
 </header>
@@ -63,27 +92,42 @@
       <button class="tool icon-only" id="zoomReset" title="Reset view"><svg viewBox="0 0 16 16"><path d="M8 3.2A4.8 4.8 0 1 0 12.8 8" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/><path d="M8 1.4v3.4H4.8" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </div>
 
-    <!-- layer control -->
-    <div class="layers">
-      <div class="layers-head">Thermal overlay</div>
-      <input type="range" id="opacity" min="0" max="1" step="0.02" value="0.72" aria-label="Thermal overlay opacity">
+    <!-- layer control: a compact legend that is always on, with the rest behind a toggle so the
+         card no longer covers the middle of the city or the Mapbox wordmark beneath it -->
+    <div class="layers" id="layers">
       <div class="legend">
+        <div class="legend-top">
+          <span class="layers-head">Land surface temperature</span>
+          <button class="layers-toggle" id="layersToggle" aria-expanded="false"
+                  aria-controls="layersMore">Layers</button>
+        </div>
         <div class="legend-bar" id="legendBar"></div>
-        <div class="legend-scale"><span id="legLo">28°C</span><span>land surface temperature</span><span id="legHi">46°C</span></div>
+        <div class="legend-scale"><span id="legLo">32°C</span><span id="legHi">44°C</span></div>
       </div>
 
-      <div class="layers-head" style="margin-top:12px">
-        <label for="choropleth">Colour wards by</label>
+      <div class="legend legend-wards" id="legendWards" hidden>
+        <div class="layers-head">Ward shading · predicted cooling</div>
+        <div class="legend-bar" id="legendWardBar"></div>
+        <div class="legend-scale"><span>no effect</span><span id="legWardHi">—</span></div>
       </div>
-      <select id="choropleth" class="select">
-        <option value="none">Boundaries only</option>
-        <option value="lst">Baseline temperature</option>
-        <option value="delta">Predicted cooling (ΔT)</option>
-      </select>
-      <p class="layers-note" id="choroNote">Ward colour comes from the raster. Choose a mode to
-        shade wards by their own values.</p>
-      <div class="legend-inert"><span class="swatch-inert" aria-hidden="true"></span>
-        <span id="inertNote">hatched = no land pixels</span></div>
+
+      <div class="layers-more" id="layersMore" hidden>
+        <div class="layers-head"><label for="opacity">Thermal overlay</label></div>
+        <input type="range" id="opacity" min="0" max="1" step="0.02" value="0.6" aria-label="Thermal overlay opacity">
+
+        <div class="layers-head" style="margin-top:12px">
+          <label for="choropleth">Colour wards by</label>
+        </div>
+        <select id="choropleth" class="select">
+          <option value="none">Boundaries only</option>
+          <option value="lst">Baseline temperature</option>
+          <option value="delta">Predicted cooling (ΔT)</option>
+        </select>
+        <p class="layers-note" id="choroNote">Ward colour comes from the raster. Choose a mode to
+          shade wards by their own values.</p>
+        <div class="legend-inert"><span class="swatch-inert" aria-hidden="true"></span>
+          <span id="inertNote">dashed outline = outside model coverage</span></div>
+      </div>
     </div>
 
     <div class="hint" id="mapHint">Click wards to build a scenario · drag to pan · scroll to zoom</div>
@@ -92,27 +136,22 @@
   <!-- ───────────────── control rail ───────────────── -->
   <aside class="rail" aria-label="Scenario controls and results">
 
+    <!-- Pinned to the top of the rail. The full results sit several panels down, so without this
+         a planner drags a slider and the number it changes is off-screen. -->
+    <div class="resultbar is-idle" id="resultBar" role="status" aria-live="off">
+      <span class="rb-label">Predicted impact</span>
+      <span class="rb-main" id="rbMain">Select an area to see it</span>
+      <span class="rb-sub" id="rbSub"></span>
+    </div>
+
     <section class="panel">
       <div class="panel-head">
         <h2>Selection</h2>
         <button class="link-btn" id="clearSel" hidden>Clear</button>
       </div>
       <div class="selection" id="selectionBox">
-        <p class="empty">No area selected.<br><span>Click a ward on the map, or use <strong>Draw area</strong> for a custom zone.</span></p>
+        <p class="empty">No area selected.<br><span>Click a ward on the map, pick one from the <strong>Wards</strong> list, or draw a <strong>Box</strong> or <strong>Zone</strong>.</span></p>
       </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Wards</h2>
-        <span class="panel-hint" id="wardCount"></span>
-      </div>
-      <!-- Clicking the map is mouse-only. This list is the keyboard and screen-reader route to
-           the same selection: type to filter, arrow keys to move, Enter or Space to toggle. -->
-      <input type="search" id="wardSearch" class="search" placeholder="Filter wards…"
-             autocomplete="off" aria-controls="wardList">
-      <div class="wardlist" id="wardList" role="listbox" aria-multiselectable="true"
-           aria-label="Wards" tabindex="0"></div>
     </section>
 
     <section class="panel">
@@ -125,7 +164,6 @@
           <button class="seg" data-season="dry" role="radio" aria-checked="false">Dry</button>
           <button class="seg" data-season="premonsoon" role="radio" aria-checked="false">Pre-monsoon</button>
         </div>
-        <p class="field-note">Pre-monsoon (Mar–Apr) is Kochi's peak heat period.</p>
       </div>
 
       <div class="presets" id="presets">
@@ -185,7 +223,6 @@
           <span class="kpi-sub" id="kBest"></span>
         </div>
       </div>
-      <p class="kpi-caveat" id="kpiCaveat" hidden></p>
 
       <div class="compare" id="compare" hidden>
         <div class="compare-head">Strategy comparison <span>mean ΔT across selection</span></div>
@@ -198,6 +235,19 @@
         </div>
         <div id="breakdownRows"></div>
       </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Wards</h2>
+        <span class="panel-hint" id="wardCount"></span>
+      </div>
+      <!-- Clicking the map is mouse-only. This list is the keyboard and screen-reader route to
+           the same selection: type to filter, arrow keys to move, Enter or Space to toggle. -->
+      <input type="search" id="wardSearch" class="search" placeholder="Filter wards…"
+             autocomplete="off" aria-controls="wardList">
+      <div class="wardlist" id="wardList" role="listbox" aria-multiselectable="true"
+           aria-label="Wards" tabindex="0"></div>
     </section>
 
     <section class="panel">
@@ -270,10 +320,13 @@
   <span id="statModel"><b>Model</b> …</span>
   <span class="grow"></span>
   <button class="ghost-btn ghost-btn-sm" id="helpBtn" title="Show the intro again">?</button>
-  <span class="caution">Decision support only — verify against local survey before capital commitment.</span>
 </footer>
 
 <dialog id="aboutDlg" class="dlg">
+  <!-- The prose scrolls inside .dlg-body so the footer below it stays pinned. Before this the
+       dialog itself scrolled, which put both the caution and the Close button ~300px below the
+       fold — a caution nobody scrolls to is no caution at all. -->
+  <div class="dlg-body">
   <h3>How the prediction works</h3>
   <p>Baseline land surface temperature is <strong>measured</strong>, not modelled: it is the dry-season
      median of Landsat 8/9 thermal observations (2015–2026) at 30 m, cloud- and water-masked.</p>
@@ -295,10 +348,22 @@
      The <strong>model error</strong> is the deployed checkpoint's held-out RMSE on absolute
      temperature; because ΔT is a difference of two predictions from the same model, that figure
      over-states the error on ΔT. Neither is a confidence interval on a policy outcome.</p>
+  <h3 style="margin-top:18px">Why R² is modest</h3>
+  <p>The footer shows a held-out R² of about 0.60, where an ordinary regression on the same data
+     reaches about 0.84. That gap is deliberate. A cool roof pushes albedo far outside anything the
+     satellite record contains, and a model tuned only for accuracy gets that extrapolation wrong —
+     it can predict that a cool roof <em>warms</em> the surface. The deployed checkpoint accepts a
+     lower score in exchange for responses that obey the energy balance.</p>
+  <h3 style="margin-top:18px">Wards outside model coverage</h3>
+  <p id="dlgCoverage">Some wards cannot be analysed.</p>
   <dl class="dlg-facts" id="dlgFacts"></dl>
-  <p class="dlg-note">Reported ΔT is scaled to realistic coverage (roofs are a fraction of a ward).
-     Full-surface values are larger and shown per ward.</p>
-  <form method="dialog"><button class="primary-btn">Close</button></form>
+  </div>
+
+  <div class="dlg-foot">
+    <p class="dlg-caution">Decision support only — verify against local survey before capital
+       commitment.</p>
+    <form method="dialog"><button class="primary-btn">Close</button></form>
+  </div>
 </dialog>
 
 <script src="app.js"></script>

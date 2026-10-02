@@ -1,38 +1,80 @@
-/* UrbanHeat Planner — light instrument console.
-   Still deliberately single-theme, but inverted from the earlier charcoal build. That build
-   argued a light ground would fight the satellite and thermal layers, which was true of the
-   approach it took: the chrome shared a surface with the imagery. Here the chrome never touches
-   the map. Panels float as white cards on a porcelain ground, map controls are translucent white
-   on their own elevation, and the imagery keeps its own rectangle. Every colour is set
-   explicitly; the only accent is cooling teal, and heat colours stay semantic — they report a
-   temperature and never dress an interface element. */
+/* UrbanHeat Planner — instrument console, light and dark.
+   The chrome never touches the map. Panels float as cards on their own ground, map controls are
+   translucent glass on their own elevation, and the imagery keeps its own rectangle. That
+   separation is exactly what lets the console invert without the map having to change: heat
+   colours stay semantic in both themes because they report a temperature and never dress an
+   interface element, and the satellite layer is data, not decoration, so it is not dimmed to suit
+   a theme either.
+
+   EVERY colour below is a token, and the dark theme is the same list with different values. A
+   literal colour anywhere else in this file is a bug — it would stay light when the theme flips.
+   Contrast ratios are measured (WCAG relative luminance), not estimated, and are quoted against
+   the surface the text actually sits on.
+
+   The active theme is data-theme on <html>, set before first paint by the inline script in
+   index.html: a stored choice first, the OS preference otherwise. */
+
+/* WHY THE CHROME IS HUELESS AND THE ACCENT IS VIOLET — measured, not preference.
+   Data owns almost the entire colour wheel here. The thermal ramp runs 346°→237° (every red,
+   orange, yellow, cyan and blue), and the satellite imagery is green and olive. The chrome used
+   to be teal: accent 167°, surfaces 169° — and the ward "predicted cooling" ramp is 168–170°.
+   Three degrees apart. In ΔT mode the map painted wards in the exact colour the interface used
+   for "this control is active", and the green-cast panels shared a hue family with the imagery
+   they were supposed to frame, so the cards never receded. (addLayers already half-knew this: the
+   ward outline is white because a teal one "read as a patch of cool ground".)
+   That leaves violet/magenta (~260–320°) and neutral grey as the only unclaimed bands. So the
+   surfaces are hueless and the accent sits at 271°, where no data layer can ever reach it.
+   The thermal and cooling ramps are untouched: they are data and they keep their meaning. */
 
 :root{
-  /* surfaces — porcelain, warm-neutral, never flat grey */
-  --bg:#eef1f0;
+  /* surfaces — neutral, so the imagery is the only coloured thing in the frame */
+  --bg:#eff0f3;
   --surface:#ffffff;
-  --surface-2:#f2f6f5;
-  --surface-3:#e9efed;
-  --line:#e2e8e6;
-  --line-soft:#eef2f0;
+  --surface-2:#f4f5f8;
+  --surface-3:#e9ebf0;
+  --line:#e2e4ea;
+  --line-soft:#eef0f4;
+  --line-strong:#d3d7df;   /* the border that must read as an edge: buttons, controls */
 
   /* glass — map UI sits above the imagery rather than being tinted by it */
   --glass:rgba(255,255,255,.93);
   --glass-quiet:rgba(255,255,255,.88);
 
-  /* ink — ratios measured against --surface */
-  --fg:#13211f;       /* 14.8:1 */
-  --fg-dim:#41534f;   /*  8.4:1 */
-  --muted:#6b7c78;    /*  4.6:1 */
-  --faint:#889793;    /*  3.2:1 — large text and non-text only */
+  /* ink — ratios measured (WCAG relative luminance) against the surface each one sits on */
+  --fg:#14161b;       /* 15.9:1 on white */
+  --fg-dim:#434852;   /*  8.6:1 */
+  --muted:#5c636e;    /*  5.9:1 on white · 5.5:1 on --surface-2 · 5.0:1 on --surface-3 */
+  --faint:#8a919c;    /*  3.2:1 — borders and decoration ONLY, never text */
 
-  /* accent = cooling; semantic heat colours are separate from it */
-  --accent:#0d6e5e;        /* 5.9:1 on white */
-  --accent-bright:#3fb49c; /* gradient tail only — never carries text */
-  --accent-soft:rgba(13,110,94,.09);
-  --accent-ink:#ffffff;    /* text on an accent fill */
+  /* accent = interactive. NOT cooling: cooling is a data colour and lives on the map. */
+  --accent:#6d28d9;        /* 7.1:1 on white */
+  --accent-bright:#a78bfa; /* gradient tail only — never carries text */
+  --accent-soft:rgba(109,40,217,.09);
+  --accent-ink:#ffffff;    /* text ON an accent fill — inverts with the accent */
+  --accent-hover:#5b21b6;
+  /* The accent as raw channels. Focus rings and the halo keyframes need the alpha to vary across
+     stops, which a flat colour token cannot do: rgba(var(--accent-rgb),.24) can. */
+  --accent-rgb:109,40,217;
   --hot:#b83820;           /* 6.2:1 */
   --warn:#8a6410;          /* 5.1:1 */
+  --on-hot:#ffffff;        /* text on a --hot fill */
+
+  /* The toast is deliberately the inverse of the console it interrupts, in either theme. */
+  --toast-bg:#14161b;
+  --toast-fg:#ffffff;
+  --toast-err:#8f2b16;
+  --on-err:#ffffff;        /* 6.7:1 on --toast-err light · 5.4:1 dark */
+
+  /* The slider knob is a physical control and reads as one: light, with a darker edge. */
+  --knob:#ffffff;
+  --knob-line:#cbd0d9;
+  --knob-shadow:0 1px 2px rgba(20,22,27,.14), 0 6px 14px -6px rgba(20,22,27,.45);
+  --sheen:rgba(255,255,255,.62);
+
+  --hatch:rgba(20,22,27,.22);   /* the "outside coverage" hatch swatch */
+  --veil:rgba(20,22,27,.32);    /* dialog backdrop and coach marks */
+  --scroll-thumb:#b9bfc9;
+  --inset:inset 0 1px 2px rgba(20,22,27,.09);
 
   /* one radius for everything pressable. A square corner here means data, not action. */
   --pill:999px;
@@ -43,9 +85,9 @@
   --rail-w:388px;
 
   /* three steps of elevation, no more */
-  --shadow:0 1px 2px rgba(19,33,31,.05);
-  --shadow-raise:0 1px 2px rgba(19,33,31,.12), 0 8px 18px -8px rgba(19,33,31,.35);
-  --shadow-float:0 2px 4px rgba(19,33,31,.06), 0 16px 34px -18px rgba(19,33,31,.5);
+  --shadow:0 1px 2px rgba(20,22,27,.05);
+  --shadow-raise:0 1px 2px rgba(20,22,27,.12), 0 8px 18px -8px rgba(20,22,27,.35);
+  --shadow-float:0 2px 4px rgba(20,22,27,.06), 0 16px 34px -18px rgba(20,22,27,.5);
 
   --ease-out:cubic-bezier(.22,.61,.36,1);
   --ease-spring:cubic-bezier(.34,1.56,.64,1);
@@ -57,11 +99,80 @@
   color-scheme:light;
 }
 
+/* ───────────── dark ─────────────
+   Not the light theme with its lightness inverted. The ground is a hueless near-black, so the
+   satellite imagery is the only coloured thing on screen and the map card separates from it
+   cleanly. The accent has to climb to stay legible — #6d28d9 is 2.0:1 here — so violet lightens
+   to 271° at a higher value, which in turn flips the ink ON an accent fill from white to
+   near-black. Shadows stop doing the separating (they are invisible here) and the borders take
+   over, so --line is a step lighter than its light-theme counterpart rather than a step darker.
+   Ratios below are measured against --surface (#141619). */
+:root[data-theme=dark]{
+  --bg:#0c0d10;
+  --surface:#141619;
+  --surface-2:#1b1e22;
+  --surface-3:#22262b;
+  --line:#2b3036;
+  --line-soft:#1e2125;
+  --line-strong:#3a4049;
+
+  --glass:rgba(12,13,16,.90);
+  --glass-quiet:rgba(12,13,16,.86);
+
+  --fg:#e9ecf0;       /* 15.3:1 */
+  --fg-dim:#aab3bd;   /*  8.5:1 · 7.9:1 on --surface-2 */
+  --muted:#8b95a1;    /*  6.0:1 · 5.5:1 on --surface-2 · 5.0:1 on --surface-3 */
+  --faint:#5b646e;    /*  2.7:1 — decoration ONLY, never text */
+
+  --accent:#a78bfa;        /* 6.7:1 · 5.6:1 on --surface-3 */
+  --accent-bright:#cbb9ff;
+  --accent-soft:rgba(167,139,250,.14);
+  --accent-ink:#17102e;    /* 6.7:1 on the accent fill */
+  --accent-hover:#bda4ff;
+  --accent-rgb:167,139,250;
+  --hot:#ff8f72;           /* 8.1:1 */
+  --warn:#e0b457;          /* 9.4:1 */
+  --on-hot:#2a0d05;        /* 7.9:1 on a --hot fill */
+
+  --toast-bg:#e9ecf0;
+  --toast-fg:#0c0d10;
+  --toast-err:#b8452c;
+
+  --knob:#dfe3ea;
+  --knob-line:#0c0d10;     /* a light knob needs a dark edge, not a lighter one */
+  --knob-shadow:0 1px 2px rgba(0,0,0,.5), 0 6px 14px -6px rgba(0,0,0,.8);
+  --sheen:rgba(255,255,255,.40);
+
+  --hatch:rgba(233,236,240,.30);
+  --veil:rgba(3,4,6,.62);
+  --scroll-thumb:#3c434d;
+  --inset:inset 0 1px 2px rgba(0,0,0,.55);
+
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+  --shadow-raise:0 1px 2px rgba(0,0,0,.5), 0 8px 18px -8px rgba(0,0,0,.8);
+  --shadow-float:0 2px 4px rgba(0,0,0,.45), 0 16px 34px -18px rgba(0,0,0,.95);
+
+  color-scheme:dark;
+}
+
+/* Flipping the theme must not animate, for two separate reasons. The cosmetic one: only
+   transitioned properties would ease, so the console would arrive in pieces — buttons fading
+   while panels snap. The actual bug: when a transitioned property's value comes from a custom
+   property, Chromium can latch it at the OLD value and never finish, which left the segmented
+   control's label at the dark theme's grey on a light surface — 2.6:1, permanently, until a
+   reload. So transitions go off for the one frame in which the new palette lands (see
+   applyTheme() in app.js, which adds this class, forces the recalc, then drops it). */
+:root.theme-shift *,
+:root.theme-shift *::before,
+:root.theme-shift *::after{transition:none !important}
+
 *{box-sizing:border-box}
 /* Author rules like `display:grid` beat the UA's `[hidden]{display:none}`, so an element
    toggled with el.hidden would stay visible. Make the attribute authoritative. */
 [hidden]{display:none !important}
-html,body{height:100%;margin:0}
+/* The background is on <html> as well as <body>: overscroll past the end of the page shows the
+   root's colour, and a white flash there is loud in the dark theme. */
+html,body{height:100%;margin:0;background:var(--bg)}
 body{
   /* min-height as well as height: a pure height:100% chain collapses to zero if an ancestor
      has no resolved height, which would leave the map stage unrendered. */
@@ -86,33 +197,43 @@ button{font-family:inherit}
 }
 
 /* ───────────── top bar ───────────── */
+/* Map height is the scarce resource on a laptop, so the bar is kept to 56px. */
 .topbar{
-  display:flex; align-items:center; gap:16px;
-  padding:0 18px; height:64px; flex:none;
+  display:flex; align-items:center; gap:14px;
+  padding:0 16px; height:56px; flex:none;
   background:var(--surface);
   border-bottom:1px solid var(--line);
 }
+.topbar .ghost-btn{height:34px;padding:0 15px}
 .brand{display:flex;align-items:center;gap:11px;min-width:0}
 .mark{
-  width:36px;height:36px;padding:7px;flex:none;
+  width:34px;height:34px;padding:7px;flex:none;
   color:var(--accent);background:var(--accent-soft);border-radius:var(--pill);
 }
 .brand-text{display:flex;flex-direction:column;line-height:1.2;min-width:0}
 .brand-text strong{font-family:var(--font-display);font-size:15px;font-weight:600;letter-spacing:-.01em}
 .brand-text span{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Only the two controls live here now, so they share one even gap. The wider group boundary this
+   used to carry separated them from the status chips, which are gone. */
 .topbar-meta{margin-left:auto;display:flex;align-items:center;gap:8px}
 
-.chip{
-  font-family:var(--font-mono); font-size:11px; letter-spacing:.02em;
-  color:var(--accent); background:var(--accent-soft);
-  border:1px solid rgba(13,110,94,.22); padding:6px 13px; border-radius:var(--pill); white-space:nowrap;
-}
-.chip-quiet{color:var(--muted);background:var(--surface-2);border-color:var(--line)}
 .ghost-btn{
-  background:var(--surface);border:1px solid #d5dedb;color:var(--fg);
+  background:var(--surface);border:1px solid var(--line-strong);color:var(--fg);
   padding:0 17px;height:38px;border-radius:var(--pill);font-size:13px;font-weight:500;cursor:pointer;
 }
 .ghost-btn:hover{color:var(--accent);border-color:var(--accent)}
+/* The only unlabelled buttons outside the map toolbar: a circle, so they read as a mode switch
+   rather than a truncated label.
+   Written as .ghost-btn.icon-btn, not .icon-btn: `.topbar .ghost-btn` sets padding:0 15px and
+   outranks a single class, which left a 34px button with a 2px content box. A grid item wider
+   than its area does not centre — it overflows from the start edge — so the icon sat 7px right
+   of centre. Matching that specificity is what actually zeroes the padding. */
+.ghost-btn.icon-btn{display:inline-grid;place-items:center;width:34px;padding:0;flex:none}
+.icon-btn svg{width:16px;height:16px}
+/* The toggle shows the theme it switches TO, which is why the icons swap with the theme and not
+   with a class on the button — there is one source of truth for which theme is live. */
+:root[data-theme=dark] .icon-moon,
+:root:not([data-theme=dark]) .icon-sun{display:none}
 
 /* ───────────── shell ───────────── */
 /* Padding plus a gap is what turns the two regions into floating cards rather than panes. */
@@ -134,8 +255,12 @@ button{font-family:inherit}
 /* rubber-band selection box (screen space, converted to lng/lat on release) */
 .box-draw{
   position:absolute;z-index:15;pointer-events:none;
-  border:1.6px dashed var(--accent);background:rgba(13,110,94,.16);
-  border-radius:4px;
+  /* Map space, not chrome: these literals are deliberate and do NOT follow the theme, for the
+     same reason the ward outlines in app.js do not. They have to stay legible over satellite
+     imagery and over every colour in the thermal ramp, which the theme does not change.
+     White with a dark halo: visible on any thermal colour, and not teal (see addLayers). */
+  border:2px dashed #fff;background:rgba(255,255,255,.2);border-radius:4px;
+  box-shadow:0 0 0 1.5px rgba(10,12,16,.8), inset 0 0 0 1.5px rgba(10,12,16,.8);
 }
 
 /* Mapbox chrome, retuned for the console palette */
@@ -149,9 +274,13 @@ button{font-family:inherit}
 .mapboxgl-ctrl-attrib{background:var(--glass-quiet)!important;border-radius:6px 0 0 0}
 .mapboxgl-ctrl-attrib a{color:var(--muted)!important}
 .mapboxgl-ctrl-scale{
-  background:var(--glass-quiet);border-color:#c9d5d2;color:var(--fg-dim);
+  background:var(--glass-quiet);border-color:var(--line-strong);color:var(--fg-dim);
   font-family:var(--font-mono);font-size:10px;
 }
+/* Mapbox's attribution "i" is a dark background-image SVG we cannot recolour, so on dark glass it
+   is a dark mark on a dark pill. Inverting the button is the only way to keep it visible, and the
+   terms require it to stay visible. */
+:root[data-theme=dark] .mapboxgl-ctrl-attrib-button{filter:invert(1) opacity(.75)}
 
 .stage-loading{
   position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:14px;
@@ -175,29 +304,50 @@ button{font-family:inherit}
 .tool svg{width:14px;height:14px;flex:none}
 .tool:hover{background:var(--surface-2);color:var(--fg)}
 .tool.is-active{background:var(--accent);color:var(--accent-ink);font-weight:600}
-.tool.is-active:hover{background:#0a5a4c;color:var(--accent-ink)}
+.tool.is-active:hover{background:var(--accent-hover);color:var(--accent-ink)}
 /* icon-only tools are perfect circles — the only unlabelled buttons in the product */
 .tool.icon-only{width:36px;padding:0}
 .tool-sep{width:1px;height:20px;background:var(--line);margin:0 4px}
 
+/* Mapbox draws its wordmark bottom-left and its attribution bottom-right, and its terms require
+   both to stay visible. Floating controls therefore clear the bottom edge by 46px; the previous
+   16px offset clipped the wordmark in half and the hint pill sat on the attribution button. */
 .layers{
-  position:absolute;left:16px;bottom:16px;z-index:20;width:268px;
-  background:var(--glass);border:1px solid var(--line);border-radius:var(--radius);
-  padding:15px 16px 13px;box-shadow:var(--shadow-float);backdrop-filter:blur(8px);
+  position:absolute;left:16px;bottom:46px;z-index:20;width:236px;
+  background:var(--glass);border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:11px 13px 10px;box-shadow:var(--shadow-float);backdrop-filter:blur(8px);
 }
 .layers-head{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);
   font-weight:600;margin-bottom:5px}
-.legend{margin-top:10px}
-.legend-bar{height:10px;border-radius:var(--pill)}
-.legend-scale{display:flex;justify-content:space-between;gap:6px;margin-top:6px;
+.layers-head label{cursor:pointer}
+.legend{margin:0}
+.legend-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}
+.legend-top .layers-head{margin:0;font-size:10.5px}
+.layers-toggle{
+  flex:none;height:24px;padding:0 11px;border-radius:var(--pill);cursor:pointer;
+  background:var(--surface-2);border:1px solid var(--line);color:var(--fg-dim);
+  font-size:11.5px;font-weight:500;
+  transition:background-color .18s ease,color .18s ease,border-color .18s ease;
+}
+.layers-toggle:hover,.layers-toggle[aria-expanded=true]{
+  background:var(--accent-soft);border-color:var(--accent);color:var(--accent);
+}
+.legend-bar{height:8px;border-radius:var(--pill)}
+.legend-scale{display:flex;justify-content:space-between;gap:6px;margin-top:5px;
   font-size:10.5px;color:var(--muted);font-family:var(--font-mono)}
-.legend-scale span:nth-child(2){font-family:var(--font-ui);letter-spacing:.02em}
+.legend-wards{margin-top:10px;padding-top:9px;border-top:1px solid var(--line-soft)}
+.layers-more{margin-top:11px;padding-top:11px;border-top:1px solid var(--line-soft)}
 
+/* A one-off instruction, not furniture: centred along the bottom edge, away from both Mapbox
+   corners, and it fades once the planner has done what it says. */
 .hint{
-  position:absolute;right:16px;bottom:18px;z-index:20;font-size:12px;color:var(--fg-dim);
+  position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:20;
+  font-size:12px;color:var(--fg-dim);white-space:nowrap;
   background:var(--glass-quiet);border:1px solid var(--line);padding:7px 15px;
   border-radius:var(--pill);backdrop-filter:blur(6px);
+  transition:opacity .45s ease;
 }
+.hint.is-gone{opacity:0;pointer-events:none}
 
 /* ───────────── range inputs: the signature control ─────────────
    enhanceRanges() in app.js wraps each <input type=range> in a .sld and keeps --p (0–1) on the
@@ -221,14 +371,14 @@ input[type=range]::-moz-range-track{
 }
 input[type=range]::-webkit-slider-thumb{
   -webkit-appearance:none;width:26px;height:26px;margin-top:-8px;border-radius:var(--pill);
-  background:var(--surface);border:1px solid #c9d5d2;
-  box-shadow:0 1px 2px rgba(19,33,31,.14), 0 6px 14px -6px rgba(19,33,31,.45);
+  background:var(--knob);border:1px solid var(--knob-line);
+  box-shadow:var(--knob-shadow);
   transition:transform .2s var(--ease-spring), box-shadow .2s ease, border-color .2s ease;
 }
 input[type=range]::-moz-range-thumb{
   width:26px;height:26px;border-radius:var(--pill);
-  background:var(--surface);border:1px solid #c9d5d2;
-  box-shadow:0 1px 2px rgba(19,33,31,.14), 0 6px 14px -6px rgba(19,33,31,.45);
+  background:var(--knob);border:1px solid var(--knob-line);
+  box-shadow:var(--knob-shadow);
   transition:transform .2s var(--ease-spring);
 }
 
@@ -241,12 +391,12 @@ input[type=range]::-moz-range-thumb{
 .sld:hover input[type=range]::-moz-range-thumb{transform:scale(1.1);border-color:var(--accent)}
 .sld input[type=range]:active::-webkit-slider-thumb{transform:scale(1.18)}
 .sld input[type=range]:focus-visible::-webkit-slider-thumb{
-  border-color:var(--accent);box-shadow:0 0 0 4px rgba(13,110,94,.24);
+  border-color:var(--accent);box-shadow:0 0 0 4px rgba(var(--accent-rgb),.24);
 }
 
 .sld-rail{
   position:absolute;left:0;right:0;top:12px;height:10px;border-radius:var(--pill);
-  background:var(--surface-3);box-shadow:inset 0 1px 2px rgba(19,33,31,.09);
+  background:var(--surface-3);box-shadow:var(--inset);
 }
 .sld-fill{
   position:absolute;left:0;top:12px;height:10px;border-radius:var(--pill);overflow:hidden;
@@ -256,7 +406,7 @@ input[type=range]::-moz-range-thumb{
 }
 .sld-sheen{
   position:absolute;top:0;bottom:0;left:0;width:110px;
-  background:linear-gradient(100deg,rgba(255,255,255,0),rgba(255,255,255,.62) 48%,rgba(255,255,255,0));
+  background:linear-gradient(100deg,transparent,var(--sheen) 48%,transparent);
   animation:sheen 3.6s cubic-bezier(.45,0,.25,1) infinite;
 }
 @keyframes sheen{0%{transform:translateX(-130px)}55%,100%{transform:translateX(420px)}}
@@ -268,9 +418,9 @@ input[type=range]::-moz-range-thumb{
   transition:left .34s var(--ease-out);
 }
 @keyframes halo{
-  0%{box-shadow:0 0 0 0 rgba(13,110,94,.30)}
-  70%{box-shadow:0 0 0 13px rgba(13,110,94,0)}
-  100%{box-shadow:0 0 0 0 rgba(13,110,94,0)}
+  0%{box-shadow:0 0 0 0 rgba(var(--accent-rgb),.30)}
+  70%{box-shadow:0 0 0 13px rgba(var(--accent-rgb),0)}
+  100%{box-shadow:0 0 0 0 rgba(var(--accent-rgb),0)}
 }
 /* An intervention that is switched off should not advertise itself as live. */
 .sld.is-zero .sld-halo{animation:none}
@@ -281,7 +431,24 @@ input[type=range]::-moz-range-thumb{
 .rail{
   background:transparent;
   overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:14px;
+  scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent;
 }
+
+/* Pinned result strip. The full results panel sits several cards below the sliders, so without
+   this a planner drags a slider and the number it moves is off-screen. */
+.resultbar{
+  position:sticky;top:0;z-index:6;flex:none;
+  display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 12px;
+  padding:11px 16px 12px;background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--radius-sm);box-shadow:var(--shadow-raise);
+}
+.rb-label{width:100%;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--muted);font-weight:600}
+.rb-main{font-family:var(--font-mono);font-size:22px;font-weight:600;letter-spacing:-.02em;
+  color:var(--accent)}
+.rb-sub{margin-left:auto;font-family:var(--font-mono);font-size:12px;color:var(--fg-dim)}
+.resultbar.is-idle .rb-main{font-family:var(--font-ui);font-size:13px;font-weight:500;
+  letter-spacing:0;color:var(--muted)}
 .panel{
   padding:18px;background:var(--surface);
   border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);
@@ -317,16 +484,20 @@ input[type=range]::-moz-range-thumb{
 .tagx button{
   display:inline-flex;align-items:center;justify-content:center;
   width:20px;height:20px;padding:0;border:0;border-radius:var(--pill);
-  background:rgba(13,110,94,.14);color:var(--accent);cursor:pointer;font-size:13px;line-height:1;
+  background:rgba(var(--accent-rgb),.14);color:var(--accent);cursor:pointer;font-size:13px;line-height:1;
   transition:background-color .18s ease,color .18s ease;
 }
-.tagx button:hover{background:var(--hot);color:#fff}
+.tagx button:hover{background:var(--hot);color:var(--on-hot)}
 
 /* presets */
-.presets{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px}
+/* The strategy grid is a block in the panel's 18px rhythm, like every .field. It used to inherit
+   its top spacing from the season note that sat above it; with that paragraph gone the grid butted
+   straight onto the segmented control at 0px, the only broken gap in the rail. State it, so the
+   rhythm no longer depends on a paragraph that may or may not be there. */
+.presets{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:18px 0}
 .preset{
   display:inline-flex;align-items:center;justify-content:center;
-  background:var(--surface);border:1px solid #d5dedb;color:var(--fg-dim);
+  background:var(--surface);border:1px solid var(--line-strong);color:var(--fg-dim);
   height:38px;padding:0 12px;border-radius:var(--pill);font-size:12.5px;font-weight:500;cursor:pointer;
 }
 .preset:hover{border-color:var(--accent);color:var(--accent)}
@@ -380,12 +551,13 @@ input[type=range]::-moz-range-thumb{
 .seg{flex:1;background:none;border:0;color:var(--muted);font-size:12.5px;font-weight:500;
   height:32px;padding:0 10px;border-radius:var(--pill);cursor:pointer}
 .seg:hover{color:var(--fg)}
-.seg.is-active{background:var(--surface);color:var(--fg);font-weight:600;box-shadow:0 1px 2px rgba(19,33,31,.10)}
+.seg.is-active{background:var(--surface);color:var(--fg);font-weight:600;box-shadow:var(--shadow)}
 
 .kpi-sub{display:block;margin-top:3px;font-size:10.5px;color:var(--muted);font-family:var(--font-mono)}
 
 /* priority ranking */
-.rank{display:flex;flex-direction:column;max-height:290px;overflow-y:auto;gap:2px}
+.rank{display:flex;flex-direction:column;max-height:290px;overflow-y:auto;gap:2px;
+  overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent}
 .rank-row{
   display:grid;grid-template-columns:22px 1fr 54px 48px;gap:10px;align-items:center;
   background:none;border:0;border-radius:var(--radius-row);padding:9px 10px;cursor:pointer;text-align:left;
@@ -394,7 +566,7 @@ input[type=range]::-moz-range-thumb{
 }
 .rank-row:hover{background:var(--surface-2);color:var(--fg);transform:translateX(2px)}
 .rank-row.is-selected{background:var(--accent-soft);color:var(--fg)}
-.rank-n{font-family:var(--font-mono);font-size:11.5px;color:var(--faint)}
+.rank-n{font-family:var(--font-mono);font-size:11.5px;color:var(--muted)}
 .rank-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .rank-base,.rank-dt{font-family:var(--font-mono);font-size:11.5px;text-align:right}
 .rank-dt{color:var(--accent);font-weight:600}
@@ -403,10 +575,10 @@ input[type=range]::-moz-range-thumb{
 /* toast */
 .toast{
   position:fixed;left:50%;bottom:34px;transform:translateX(-50%);z-index:80;
-  background:var(--fg);border:1px solid var(--fg);color:#fff;
+  background:var(--toast-bg);border:1px solid var(--toast-bg);color:var(--toast-fg);
   padding:11px 18px;border-radius:var(--pill);font-size:12.5px;box-shadow:var(--shadow-float);max-width:80vw;
 }
-.toast.is-error{background:#8f2b16;border-color:#8f2b16;color:#fff}
+.toast.is-error{background:var(--toast-err);border-color:var(--toast-err);color:var(--on-err)}
 
 /* ───────────── status bar ───────────── */
 .statusbar{
@@ -415,33 +587,60 @@ input[type=range]::-moz-range-thumb{
   font-size:11px;color:var(--muted);
 }
 .statusbar b{color:var(--fg-dim);font-weight:600}
-.statusbar .sep{color:#c9d5d2}
+.statusbar .sep{color:var(--line-strong)}
 .statusbar .grow{flex:1}
-.statusbar .caution{color:var(--warn)}
+/* a term with an explanation behind it: dotted underline, help cursor, reachable by keyboard */
+.tip{border-bottom:1px dotted var(--muted);cursor:help}
+.tip:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
 
 /* ───────────── dialog ───────────── */
+/* A column: the prose scrolls, the footer does not. The padding moves onto the two children so
+   the footer's rule can run the full width of the card. */
 .dlg{
   border:1px solid var(--line);background:var(--surface);color:var(--fg);
-  border-radius:var(--radius);padding:26px 28px;max-width:560px;box-shadow:var(--shadow-float);
+  border-radius:var(--radius);padding:0;max-width:560px;box-shadow:var(--shadow-float);
+  overflow:hidden;
 }
-.dlg::backdrop{background:rgba(19,33,31,.32);backdrop-filter:blur(2px)}
+/* The column layout goes on [open], NOT on .dlg. The UA hides a closed dialog with
+   `dialog:not([open]){display:none}`, but an author `display:flex` beats the UA stylesheet no
+   matter the specificity — so putting it on .dlg rendered the closed dialog permanently in the
+   page flow as a second, unclosable copy of the panel. */
+.dlg[open]{display:flex;flex-direction:column}
+.dlg-body{overflow-y:auto;overscroll-behavior:contain;padding:26px 28px 18px;
+  scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent}
+.dlg-foot{
+  flex:none;display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  padding:13px 28px 15px;background:var(--surface);border-top:1px solid var(--line);
+}
+.dlg-foot form{margin-left:auto}
+.dlg-foot .primary-btn{margin-top:0}
+/* ::backdrop is the one place a token is not safe: it is not a descendant of anything, and older
+   engines resolve var() on it against nothing at all — which would leave the dialog with no
+   backdrop. Selector matching is unaffected, so the theme override is written out instead. */
+.dlg::backdrop{background:rgba(20,22,27,.32);backdrop-filter:blur(2px)}
+:root[data-theme=dark] .dlg::backdrop{background:rgba(3,4,6,.62)}
 .dlg h3{margin:0 0 13px;font-family:var(--font-display);font-size:20px;font-weight:600;letter-spacing:-.02em}
 .dlg p{margin:0 0 12px;font-size:13.5px;color:var(--fg-dim);line-height:1.6;max-width:62ch}
 .dlg .mono{font-family:var(--font-mono);font-size:12.5px;color:var(--accent)}
-.dlg-note{font-size:12.5px !important;color:var(--muted) !important;
-  border-left:2px solid var(--accent-soft);padding-left:12px}
+/* The standing caution. It used to sit in the status bar; in the pinned footer it is on screen
+   the whole time the dialog is open, next to the button that dismisses it. It keeps the warn
+   colour rather than the muted grey of an aside, because it is not an aside. */
+.dlg-caution{
+  flex:1 1 240px;margin:0 !important;font-size:12px !important;line-height:1.45;
+  color:var(--warn) !important;border-left:2px solid var(--warn);padding-left:11px;
+}
 .primary-btn{
   margin-top:8px;background:var(--accent);color:var(--accent-ink);border:1px solid transparent;
   height:44px;padding:0 22px;border-radius:var(--pill);font-weight:600;font-size:14px;cursor:pointer;
   box-shadow:var(--shadow-raise);
 }
-.primary-btn:hover{background:#0a5a4c}
+.primary-btn:hover{background:var(--accent-hover)}
 
 /* A focus ring that survives both white cards and the imagery behind the map controls. */
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .tool:focus-visible,.primary-btn:focus-visible,.ghost-btn:focus-visible,
 .preset:focus-visible,.seg:focus-visible,.link-btn:focus-visible{
-  outline:none;box-shadow:0 0 0 3px var(--surface), 0 0 0 6px rgba(13,110,94,.45);
+  outline:none;box-shadow:0 0 0 3px var(--surface), 0 0 0 6px rgba(var(--accent-rgb),.45);
 }
 
 /* ───────────── motion, opted out ───────────── */
@@ -470,13 +669,13 @@ input[type=range]::-moz-range-thumb{
   padding:0 12px;font-family:inherit;font-size:12.5px;cursor:pointer;
 }
 .select:focus-visible,.search:focus-visible{
-  outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(13,110,94,.22);
+  outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.22);
 }
 .layers-note{margin:6px 0 0;font-size:10.5px;color:var(--muted);line-height:1.45}
 .legend-inert{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:10.5px;color:var(--muted)}
 .swatch-inert{
   width:14px;height:10px;border-radius:2px;border:1px dashed var(--faint);
-  background:repeating-linear-gradient(45deg,transparent,transparent 2px,rgba(19,33,31,.22) 2px,rgba(19,33,31,.22) 4px);
+  background:repeating-linear-gradient(45deg,transparent,transparent 2px,var(--hatch) 2px,var(--hatch) 4px);
 }
 
 /* ───────────── accessible ward list ───────────── */
@@ -485,8 +684,22 @@ input[type=range]::-moz-range-thumb{
   border:1px solid var(--line);border-radius:var(--pill);
   padding:0 14px;font-family:inherit;font-size:12.5px;margin-bottom:8px;
 }
-.search::placeholder{color:var(--faint)}
-.wardlist{max-height:188px;overflow:auto;border:1px solid var(--line-soft);border-radius:var(--radius-sm)}
+.search::placeholder{color:var(--muted)}
+/* position:relative so a selected row's offsetTop can be measured against the list, and
+   overscroll-behavior:contain so reaching the end of the list does not start scrolling the rail
+   — two nested scrollbars were fighting over the wheel. */
+.wardlist{
+  position:relative;max-height:232px;overflow:auto;overscroll-behavior:contain;
+  scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent;
+  border:1px solid var(--line-soft);border-radius:var(--radius-sm);
+}
+.ward-group{
+  position:sticky;top:0;z-index:1;display:flex;flex-direction:column;gap:1px;
+  padding:7px 10px 6px;background:var(--surface-3);border-bottom:1px solid var(--line-soft);
+  font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+}
+.ward-group span{text-transform:none;letter-spacing:0;font-weight:400;font-size:11px;line-height:1.4}
+.ward-row .ward-tag{font-size:10px;color:var(--muted);font-style:italic;margin-left:6px}
 .wardlist:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .ward-row{
   display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;width:100%;
@@ -498,17 +711,11 @@ input[type=range]::-moz-range-thumb{
 .ward-row.is-cursor{background:var(--surface-3);box-shadow:inset 2px 0 0 var(--accent)}
 .ward-row.is-selected{color:var(--fg)}
 .ward-row.is-selected .ward-name::before{content:"✓ ";color:var(--accent)}
-.ward-row[aria-disabled=true]{color:var(--faint);cursor:not-allowed}
+.ward-row[aria-disabled=true]{color:var(--muted);cursor:not-allowed}
 .ward-row .ward-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ward-row .ward-t{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
-.ward-row .ward-flag{font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+.ward-row .ward-flag{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
 .panel-hint{font-size:10.5px;color:var(--muted)}
-
-/* ───────────── KPI additions ───────────── */
-.kpi-caveat{
-  margin:8px 0 0;font-size:10.5px;color:var(--muted);line-height:1.5;
-  border-left:2px solid var(--line);padding-left:9px;
-}
 
 /* ───────────── rank sort ───────────── */
 .segmented-sm .seg{padding:4px 0;font-size:11px}
@@ -534,7 +741,7 @@ input[type=range]::-moz-range-thumb{
 }
 .scen-open span{display:block;font-size:10px;color:var(--muted);font-family:var(--font-mono)}
 .scen-dt{font-family:var(--font-mono);font-size:12px;color:var(--accent);font-weight:600}
-.scen-del{background:none;border:0;color:var(--faint);cursor:pointer;font-size:14px;padding:0 2px}
+.scen-del{background:none;border:0;color:var(--muted);cursor:pointer;font-size:14px;padding:0 2px}
 .scen-del:hover{color:var(--hot)}
 .scen-actions{display:flex;gap:6px;margin-top:9px}
 .ghost-btn-sm{height:28px;padding:0 13px;font-size:11.5px}
@@ -554,11 +761,11 @@ input[type=range]::-moz-range-thumb{
 .diff-row .d-label{color:var(--muted)}
 .diff-row .d-delta.better{color:var(--accent)}
 .diff-row .d-delta.worse{color:var(--warn)}
-.diff-head-row{color:var(--faint);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+.diff-head-row{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
 
 /* ───────────── onboarding coach marks ───────────── */
 .coach{
-  position:fixed;inset:0;z-index:60;background:rgba(19,33,31,.32);backdrop-filter:blur(2px);
+  position:fixed;inset:0;z-index:60;background:var(--veil);backdrop-filter:blur(2px);
   display:grid;place-items:center;padding:20px;
 }
 .coach-card{
@@ -593,8 +800,8 @@ input[type=range]::-moz-range-thumb{
   body{overflow:auto}
   .shell{grid-template-columns:1fr;height:auto}
   .stage{height:min(62vh,560px)}
-  .rail{max-height:none}
-  .layers{width:232px}
+  .rail{max-height:none;overflow:visible}
+  .layers{width:220px}
   .hint{display:none}
 }
 @media (max-width:560px){
@@ -604,9 +811,17 @@ input[type=range]::-moz-range-thumb{
   .panel{padding:15px 14px}
   .presets{grid-template-columns:1fr 1fr}
   .statusbar{font-size:10.5px}
-  .statusbar .caution{flex-basis:100%}
+  /* The 6-button map toolbar is ~425px wide at 44px per button, wider than a phone, and the map
+     card clips its overflow — so zoom-reset was unreachable. Let it wrap inside the card. */
+  .toolbar{max-width:calc(100% - 32px);flex-wrap:wrap;row-gap:2px;border-radius:24px}
+  .tool{padding:0 12px}
+  .tool.icon-only{width:44px;padding:0}
+  .tool-sep{display:none}
   /* 44px is the floor for a touch target, and a fatter thumb needs a taller track */
   .ghost-btn,.preset,.tool{height:44px}
+  /* .topbar .ghost-btn pins its pills to 34px, which the labelled ones can carry. An unlabelled
+     circle cannot: it is the hardest target in the bar, so it takes the touch floor. */
+  .topbar .ghost-btn.icon-btn{width:44px;height:44px}
   .sld,.sld input[type=range]{height:40px}
   .sld-rail,.sld-fill{top:15px}
   .sld input[type=range]::-webkit-slider-runnable-track{height:40px}
@@ -618,10 +833,20 @@ input[type=range]::-moz-range-thumb{
 
 /* ───────────── print: a clean one-page scenario sheet ───────────── */
 @media print{
-  :root{--bg:#fff;--surface:#fff;--surface-2:#fff;--surface-3:#fff;--fg:#111;
+  /* A scenario sheet goes on white paper in either theme, so this has to beat the dark tokens —
+     hence the attribute selectors: same specificity as :root[data-theme=dark], later in the file.
+     Printing the dark palette would be unreadable and a waste of a cartridge. */
+  :root,:root[data-theme=dark],:root[data-theme=light]{
+        --bg:#fff;--surface:#fff;--surface-2:#fff;--surface-3:#fff;--fg:#111;
         --fg-dim:#222;--muted:#555;--faint:#777;--line:#ccc;--line-soft:#e3e3e3;
-        --accent:#0f766e;--accent-bright:#0f766e;--accent-soft:#fff;
-        --shadow:none;--shadow-raise:none;--shadow-float:none}
+        --line-strong:#bbb;
+        --accent:#5b21b6;--accent-bright:#5b21b6;--accent-soft:#fff;
+        --accent-ink:#fff;--accent-hover:#5b21b6;--accent-rgb:91,33,182;
+        --hot:#9a2c14;--warn:#6b4c08;--on-hot:#fff;
+        --knob:#fff;--knob-line:#999;--knob-shadow:none;--sheen:transparent;
+        --hatch:rgba(0,0,0,.25);--veil:transparent;--inset:none;--scroll-thumb:#999;
+        --shadow:none;--shadow-raise:none;--shadow-float:none;
+        color-scheme:light}
   body{overflow:visible;display:block;color:#111;background:#fff}
   .shell{display:block;min-height:0;padding:0;gap:0}
   .stage{height:auto;min-height:0;page-break-inside:avoid;border-radius:0;border:0}
@@ -629,10 +854,9 @@ input[type=range]::-moz-range-thumb{
   .toolbar,.layers,.hint,.box-draw,.toast,.ghost-btn,.link-btn,
   .mapboxgl-ctrl,.presets,.sld,input[type=range],.status-dot,
   .coach,.search,.wardlist,.segmented,.scen-actions,.scen-pick,.scen-del,
-  .select,.legend-inert{display:none!important}
+  .select,.legend-inert,.resultbar,.layers-toggle,.layers-more{display:none!important}
   .scen-row{grid-template-columns:1fr auto;border:1px solid #ddd}
   .diff{break-inside:avoid}
-  .kpi-caveat{color:#555}
   .rail{border:0;max-height:none;overflow:visible;display:block;gap:0}
   .panel{break-inside:avoid;border:0;border-bottom:1px solid #ddd;border-radius:0;box-shadow:none}
   .rank{max-height:none;overflow:visible}

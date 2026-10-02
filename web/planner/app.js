@@ -31,6 +31,9 @@
   const STORE_KEY = "urbanheat.scenarios.v1";
   const COACH_KEY = "urbanheat.coachSeen.v1";
   const MAX_PICK = 2;
+  // The thermal raster is Landsat at 30 m. Smoothed when zoomed out (nearest-neighbour there is a
+  // wall of blocky speckle); true blocks once a pixel is large enough on screen to be read as one.
+  const NEAREST_ZOOM = 15;
 
   const state = {
     map: null, meta: null, bounds: null,
@@ -58,10 +61,73 @@
     lastSummary: null,
     tileFails: 0,
     refreshing: false,
+    resampling: "linear",
+    hintTimer: null,
   };
 
   const fail = (html) => { $("stageLoading").innerHTML = html; $("stageLoading").hidden = false; };
   const announce = (msg) => { $("liveRegion").textContent = msg; };
+
+  /* ─────────────── theme ───────────────
+   * data-theme is already on <html> before this file runs (inline script in index.html, so the
+   * dark theme does not arrive as a flash after a light first paint). This owns only the change.
+   * An explicit choice is the one thing that outranks the OS preference: until the planner picks,
+   * the console follows the system, including a change made while the page is open. Every
+   * localStorage touch is wrapped — same reason as the saved scenarios.
+   */
+  const THEME_KEY = "urbanheat.theme.v1";
+  const themeOf = () => document.documentElement &&
+    document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  const storedTheme = () => {
+    try { return localStorage.getItem(THEME_KEY); } catch { return null; }
+  };
+
+  function applyTheme(mode, remember) {
+    const root = document.documentElement;
+    if (root && root.setAttribute) {
+      // Transitions off, flip, force the recalc while they are still off, then back on two
+      // frames later. Without the forced read the class and the attribute land in the same
+      // recalc and nothing is suppressed; see .theme-shift in styles.css for why it matters.
+      root.classList.add("theme-shift");
+      root.setAttribute("data-theme", mode);
+      void root.offsetWidth;
+      // A timer, not requestAnimationFrame: rAF is throttled to nothing in a background tab, and
+      // a theme switched in one (a restored session, another window) would come back with every
+      // transition in the app permanently disabled. The forced read above has already committed
+      // the new palette, so dropping the class late cannot re-trigger a transition.
+      setTimeout(() => root.classList.remove("theme-shift"), 50);
+    }
+    if (remember) {
+      try { localStorage.setItem(THEME_KEY, mode); } catch { /* private window — still switches */ }
+    }
+    const btn = $("themeBtn");
+    if (!btn) return;
+    const dark = mode === "dark";
+    // The icon swap is CSS, off data-theme. The button only has to carry the accessible name,
+    // which is the one thing a sighted planner reads from the icon and a screen reader cannot.
+    const label = dark ? "Dark theme on — switch to light" : "Light theme on — switch to dark";
+    btn.setAttribute("aria-pressed", String(dark));
+    btn.setAttribute("aria-label", label);
+    btn.setAttribute("title", label);
+  }
+
+  function wireTheme() {
+    applyTheme(themeOf(), false);                     // label the button for the theme in force
+    const btn = $("themeBtn");
+    if (btn && btn.addEventListener) {
+      btn.addEventListener("click", () => {
+        const next = themeOf() === "dark" ? "light" : "dark";
+        applyTheme(next, true);
+        announce(next === "dark" ? "Dark theme." : "Light theme.");
+      });
+    }
+    const mq = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+    if (mq && mq.addEventListener) {
+      mq.addEventListener("change", (ev) => {
+        if (!storedTheme()) applyTheme(ev.matches ? "dark" : "light", false);
+      });
+    }
+  }
 
   let toastTimer = null;
   function toast(msg, isError) {
@@ -122,15 +188,17 @@
 
   /* ───────────────────────── boot ───────────────────────── */
   async function boot() {
-    // Before anything that can fail: the rail is visible while the map and data load.
+    // Before anything that can fail: the rail is visible while the map and data load, and the
+    // theme toggle works even on the backend-unreachable screen below.
+    wireTheme();
     enhanceRanges();
 
     let meta, wards;
     try {
       [meta, wards] = await Promise.all([api("/api/meta"), api("/api/wards")]);
     } catch (err) {
-      return fail(`<p style="color:#b83820;max-width:36ch">Could not reach the backend.<br><br>
-        <span style="color:#6b7c78">Start it with<br>
+      return fail(`<p style="color:var(--hot);max-width:36ch">Could not reach the backend.<br><br>
+        <span style="color:var(--muted)">Start it with<br>
         <code style="font-family:IBM Plex Mono,monospace">uvicorn api.planner:app --port 8080</code></span></p>`);
     }
     state.meta = meta;
@@ -138,9 +206,6 @@
     state.roofShareDefault = typeof meta.roof_share_default === "number"
       ? meta.roof_share_default : 0.5;
 
-    const lam = (meta.model.match(/lambda([0-9.]+?)\.pt/) || [])[1];
-    $("chipModel").textContent = lam ? `PINN · λ=${lam}` : meta.model;
-    $("chipWards").textContent = meta.n_wards + " wards with data";
     $("legendBar").style.background = `linear-gradient(90deg, ${meta.palette.join(",")})`;
     $("legLo").textContent = meta.lst_range[0] + "°C";
     $("legHi").textContent = meta.lst_range[1] + "°C";
@@ -155,13 +220,13 @@
     maybeCoach();
 
     if (!window.mapboxgl || !mapboxgl.supported()) {
-      return fail(`<p style="color:#8a6410;max-width:40ch">This browser cannot run Mapbox GL
-        (WebGL unavailable).<br><br><span style="color:#6b7c78">The ward list and all analysis
+      return fail(`<p style="color:var(--warn);max-width:40ch">This browser cannot run Mapbox GL
+        (WebGL unavailable).<br><br><span style="color:var(--muted)">The ward list and all analysis
         still work — only the map is unavailable.</span></p>`);
     }
     if (!meta.mapbox_token) {
-      return fail(`<p style="color:#8a6410;max-width:40ch">No Mapbox token configured.<br><br>
-        <span style="color:#6b7c78">Add <code>MAPBOX_TOKEN=…</code> to <code>.env</code> and restart.</span></p>`);
+      return fail(`<p style="color:var(--warn);max-width:40ch">No Mapbox token configured.<br><br>
+        <span style="color:var(--muted)">Add <code>MAPBOX_TOKEN=…</code> to <code>.env</code> and restart.</span></p>`);
     }
 
     initMap(meta, wards);
@@ -173,8 +238,12 @@
       : `${v.start || ""}–${v.end || ""}`;
     $("statVintage").innerHTML =
       `<b>Baseline</b> ${v.n_scenes ? v.n_scenes + " scenes" : "Landsat 8/9"}, ${win}`;
+    // R² is shown, not hidden — but a bare 0.60 reads as "poor model" to anyone used to 0.9.
+    // It is modest on purpose, and the tooltip and Method dialog say why.
     $("statModel").innerHTML = `<b>Model</b> ${meta.model_rmse
-      ? `RMSE ${meta.model_rmse} K` : "—"}${meta.model_r2 ? ` · R² ${meta.model_r2}` : ""}`;
+      ? `RMSE ${meta.model_rmse} K` : "—"}${meta.model_r2
+      ? ` · <span class="tip" tabindex="0" title="Deliberately modest. The deployed checkpoint trades in-sample accuracy for responses that stay physically valid when an intervention pushes inputs far outside the data. See Method.">R² ${meta.model_r2}</span>`
+      : ""}`;
 
     const facts = [
       ["Sensor", v.sensor || "Landsat 8/9 C2 L2"],
@@ -195,8 +264,16 @@
     renderRoofShare();
     const inert = meta.n_wards_no_data || 0;
     $("wardCount").textContent = inert
-      ? `${meta.n_wards} with data · ${inert} without`
+      ? `${meta.n_wards} analysable · ${inert} outside coverage`
       : `${meta.n_wards} wards`;
+    const cov = $("dlgCoverage");
+    if (cov) {
+      cov.textContent = inert
+        ? `${inert} of ${meta.n_wards_total} wards cannot currently be analysed. ${meta.no_data_reason || ""} `
+          + `Closing the gap means rebuilding the training table with the climate field filled in over `
+          + `coastal cells, then retraining the model.`
+        : "Every ward can be analysed.";
+    }
   }
 
   /* ───────────────────────── map ───────────────────────── */
@@ -218,11 +295,19 @@
     map.addControl(new mapboxgl.ScaleControl({ maxWidth: 110, unit: "metric" }), "bottom-right");
     map.touchZoomRotate.disableRotation();
 
+    // Smooth the 30 m raster when zoomed out; show true blocks once they are big enough to read.
+    map.on("zoom", () => {
+      const want = map.getZoom() >= NEAREST_ZOOM ? "nearest" : "linear";
+      if (want === state.resampling) return;
+      state.resampling = want;
+      if (map.getLayer("lst")) map.setPaintProperty("lst", "raster-resampling", want);
+    });
+
     map.on("error", (ev) => {
       const m = (ev && ev.error && ev.error.message) || "";
       if (/access token|Unauthorized|401/i.test(m)) {
-        fail(`<p style="color:#b83820;max-width:40ch">Mapbox rejected the access token.<br><br>
-          <span style="color:#6b7c78">Check it is a public <code>pk.</code> token and that any URL
+        fail(`<p style="color:var(--hot);max-width:40ch">Mapbox rejected the access token.<br><br>
+          <span style="color:var(--muted)">Check it is a public <code>pk.</code> token and that any URL
           restriction allows <code>localhost</code>.</span></p>`);
         return;
       }
@@ -249,8 +334,8 @@
 
     setTimeout(() => {
       if (layersAdded) return;
-      fail(`<p style="color:#8a6410;max-width:42ch">The Mapbox basemap did not load.<br><br>
-        <span style="color:#6b7c78">Most likely one of:<br>
+      fail(`<p style="color:var(--warn);max-width:42ch">The Mapbox basemap did not load.<br><br>
+        <span style="color:var(--muted)">Most likely one of:<br>
         &bull; the token is URL-restricted and does not allow <code>localhost</code><br>
         &bull; no network access to <code>api.mapbox.com</code><br>
         &bull; the token has no remaining map loads<br><br>
@@ -272,10 +357,7 @@
       if (map.getLayer("lst")) map.removeLayer("lst");
       if (map.getSource("lst")) map.removeSource("lst");
       map.addSource("lst", { type: "raster", tiles: [lst_tiles], tileSize: 256 });
-      map.addLayer({
-        id: "lst", type: "raster", source: "lst",
-        paint: { "raster-opacity": +$("opacity").value, "raster-resampling": "nearest" },
-      }, firstWardLayer(map));
+      addThermalLayer(map);
       state.tileFails = 0;
     } catch (err) {
       console.warn("tile refresh failed:", err);
@@ -284,61 +366,120 @@
     }
   }
 
-  const firstWardLayer = (map) => (map.getLayer("ward-fill") ? "ward-fill" : undefined);
+  /* LAYER ORDER is what keeps this map legible. The thermal raster goes directly above the
+     satellite imagery and BELOW every vector layer, so roads, boundaries and place names are drawn
+     over it. Added on top of the style, it tinted them and washed the labels out. */
+  function firstSymbolId(map) {
+    const l = map.getStyle().layers.find(l => l.type === "symbol");
+    return l ? l.id : undefined;
+  }
+  function thermalBeforeId(map) {
+    const layers = map.getStyle().layers;
+    const sat = layers.findIndex(l => l.type === "raster");      // the satellite imagery
+    return sat >= 0 && layers[sat + 1] ? layers[sat + 1].id : firstSymbolId(map);
+  }
+  function addThermalLayer(map) {
+    map.addLayer({
+      id: "lst", type: "raster", source: "lst",
+      paint: { "raster-opacity": +$("opacity").value, "raster-resampling": state.resampling },
+    }, thermalBeforeId(map));
+  }
 
   function addLayers(map, meta, wards) {
     map.addSource("lst", { type: "raster", tiles: [meta.lst_tiles], tileSize: 256 });
-    map.addLayer({
-      id: "lst", type: "raster", source: "lst",
-      paint: { "raster-opacity": +$("opacity").value, "raster-resampling": "nearest" },
-    });
+    addThermalLayer(map);
+
+    // Everything below sits under the first label layer, so place names stay readable on top.
+    const labelsAt = firstSymbolId(map);
 
     map.addSource("wards", { type: "geojson", data: wards, promoteId: "ward_id" });
-    map.addLayer({ id: "ward-fill", type: "fill", source: "wards", paint: fillPaint() });
+
+    // Once something is selected the other wards recede. Which wards is set in syncScrim().
+    map.addLayer({
+      id: "ward-scrim", type: "fill", source: "wards", layout: { visibility: "none" },
+      paint: { "fill-color": "#0b0d12", "fill-opacity": 0.34 },
+    }, labelsAt);
+
+    map.addLayer({ id: "ward-fill", type: "fill", source: "wards", paint: fillPaint() }, labelsAt);
+
+    // Boundaries are drawn twice — a dark casing under a light line. A single thin white line
+    // disappears against the orange of a hot ward and the blue of a cool one.
+    const SEL = ["boolean", ["feature-state", "selected"], false];
+    map.addLayer({
+      id: "ward-line-casing", type: "line", source: "wards",
+      filter: ["==", ["get", "has_data"], true], layout: { "line-join": "round" },
+      paint: {
+        "line-color": "#0b0d12",
+        "line-opacity": ["case", SEL, 0.9, 0.38],
+        "line-width": ["case", SEL, 6, 2.6],
+      },
+    }, labelsAt);
     map.addLayer({
       id: "ward-line", type: "line", source: "wards",
-      filter: ["==", ["get", "has_data"], true],
+      filter: ["==", ["get", "has_data"], true], layout: { "line-join": "round" },
       paint: {
-        "line-color": ["case",
-          ["boolean", ["feature-state", "selected"], false], "#5eead4", "rgba(255,255,255,.45)"],
-        "line-width": ["case",
-          ["boolean", ["feature-state", "selected"], false], 2.2, 0.8],
+        // White, not teal: teal sits in the cool end of the thermal ramp, so a teal selection
+        // read as a patch of cool ground rather than as "chosen".
+        "line-color": "#ffffff",
+        "line-opacity": ["case", SEL, 1, 0.82],
+        "line-width": ["case", SEL, 2.6, 1],
       },
-    });
-    // Wards with no land pixels get their own dashed outline. 27 of Kochi's 74 wards are
-    // water-dominated and cannot be analysed; leaving them looking identical to the rest reads
-    // as a broken app, so they are marked as deliberately inert on the map itself rather than
-    // only in a hover popup.
+    }, labelsAt);
+    // Wards the model cannot currently analyse keep a dashed outline of their own, so they read
+    // as deliberately inert rather than as a broken app. (Why they are inert: NO_DATA_REASON in
+    // api/planner.py — an ERA5-Land coverage gap, not an absence of land.)
     map.addLayer({
       id: "ward-line-nodata", type: "line", source: "wards",
       filter: ["!=", ["get", "has_data"], true],
+      paint: { "line-color": "rgba(255,255,255,.62)", "line-width": 1.1, "line-dasharray": [2, 2] },
+    }, labelsAt);
+
+    // Ward names. The labels already on the satellite style are neighbourhoods (Edappally, Kaloor),
+    // not KMC wards, so without these a planner cannot tell which ward is which.
+    map.addLayer({
+      id: "ward-label", type: "symbol", source: "wards", minzoom: 12.4,
+      filter: ["!=", ["get", "unnamed"], true],
+      layout: {
+        "text-field": ["get", "ward_name"],
+        "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 12.4, 10, 15, 13],
+        "text-max-width": 7, "text-padding": 3,
+      },
       paint: {
-        "line-color": "rgba(255,255,255,.3)", "line-width": 0.9, "line-dasharray": [2, 2],
+        "text-color": ["case", ["==", ["get", "has_data"], true], "#ffffff", "rgba(255,255,255,.78)"],
+        "text-halo-color": "rgba(11,13,18,.88)", "text-halo-width": 1.5,
       },
     });
 
-    // Drawn zone (polygon tool).
+    // Drawn zone (polygon tool). Same white-over-dark treatment as a selected ward.
     map.addSource("draw", { type: "geojson", data: emptyFC() });
     map.addLayer({
       id: "draw-fill", type: "fill", source: "draw",
       filter: ["==", ["geometry-type"], "Polygon"],
-      paint: { "fill-color": "#19c2a8", "fill-opacity": 0.18 },
+      paint: { "fill-color": "#ffffff", "fill-opacity": 0.22 },
+    });
+    map.addLayer({
+      id: "draw-casing", type: "line", source: "draw",
+      paint: { "line-color": "#0b0d12", "line-width": 5, "line-opacity": 0.8 },
     });
     map.addLayer({
       id: "draw-line", type: "line", source: "draw",
-      paint: { "line-color": "#5eead4", "line-width": 1.8, "line-dasharray": [2, 1.5] },
+      paint: { "line-color": "#ffffff", "line-width": 2.2, "line-dasharray": [2, 1.5] },
     });
     map.addLayer({
       id: "draw-vertex", type: "circle", source: "draw",
       filter: ["==", ["geometry-type"], "Point"],
       paint: {
-        "circle-radius": 4.5, "circle-color": "#06211d",
-        "circle-stroke-color": "#5eead4", "circle-stroke-width": 1.8,
+        "circle-radius": 4.5, "circle-color": "#ffffff",
+        "circle-stroke-color": "#0b0d12", "circle-stroke-width": 2,
       },
     });
 
     wireMapInteractions(map);
     applyChoropleth();
+    // A scenario restored before the basemap finished loading had nowhere to put its selection.
+    state.selected.forEach(id => setSel(id, true));
+    syncScrim();
   }
 
   const emptyFC = () => ({ type: "FeatureCollection", features: [] });
@@ -364,10 +505,9 @@
       color = ["case",
         ["!=", ["get", "has_data"], true], "#000000",
         ["interpolate", ["linear"], ["coalesce", ["feature-state", "dt"], 0],
-          worst, "#5eead4", worst * 0.5, "#19c2a8", 0, "#1c1b21"]];
+          worst, "#0b5e50", worst * 0.5, "#3fb49c", 0, "#f2f6ee"]];
     } else {
       color = ["case",
-        ["boolean", ["feature-state", "selected"], false], "#19c2a8",
         ["!=", ["get", "has_data"], true], "#000000",
         "#ffffff"];
     }
@@ -377,7 +517,7 @@
       "fill-color": color,
       "fill-opacity": ["case",
         ["!=", ["get", "has_data"], true], 0.3,
-        ["boolean", ["feature-state", "selected"], false], shaded ? 0.85 : 0.35,
+        ["boolean", ["feature-state", "selected"], false], shaded ? 0.85 : 0.26,
         ["boolean", ["feature-state", "hover"], false], shaded ? 0.72 : 0.14,
         shaded ? 0.56 : 0.0],
     };
@@ -397,6 +537,20 @@
       delta: "Wards shaded by predicted cooling for the current scenario. Needs a ranking run.",
     };
     $("choroNote").textContent = notes[state.choropleth];
+
+    // The main legend is the thermal raster (and, in "Baseline temperature" mode, the wards too:
+    // same ramp). Predicted cooling uses a different scale, so it gets its own legend rather than
+    // leaving shaded wards unexplained.
+    const lg = $("legendWards");
+    if (lg) {
+      const delta = state.choropleth === "delta";
+      lg.hidden = !delta;
+      if (delta) {
+        const worst = Math.min(-0.05, ...state.rank.map(r => r.delta_t));
+        $("legendWardBar").style.background = "linear-gradient(90deg,#f2f6ee,#3fb49c,#0b5e50)";
+        $("legWardHi").textContent = state.rank.length ? fmtDT(worst) + " °C" : "run Rank all";
+      }
+    }
   }
 
   function pushRankToMap() {
@@ -430,7 +584,7 @@
         p.has_data
           ? `<strong>${p.ward_name}</strong><br>${p.lst_c}°C · ${Math.round(p.built_frac * 100)}% built-up`
             + (ranked ? `<br>ΔT ${ranked.delta_t.toFixed(1)} °C` : "")
-          : `<strong>${p.ward_name}</strong><br>no land pixels — cannot be analysed`
+          : `<strong>${p.ward_name}</strong><br>outside model coverage`
       ).addTo(map);
     });
     map.on("mouseleave", "ward-fill", () => {
@@ -443,7 +597,7 @@
       if (state.tool !== "select" || !ev.features.length) return;
       const id = ev.features[0].id;
       if (!state.wards.get(id)?.has_data) {
-        toast(`${state.wards.get(id)?.ward_name || "That ward"} has no land pixels — water, cloud or outside the city.`);
+        toast(`${state.wards.get(id)?.ward_name || "That ward"}: ${noDataReason()}`);
         return;
       }
       toggleWard(id);
@@ -610,6 +764,46 @@
   }
 
   /* ─────────────────── selection ─────────────────── */
+  const noDataReason = () => (state.meta && state.meta.no_data_reason)
+    || "Outside current model coverage.";
+
+  /* Dim every analysable ward that is not selected. Only when WARDS are selected: for a drawn
+     box or zone there is no ward to emphasise, and dimming all of them would just darken the map. */
+  function syncScrim() {
+    const m = state.map;
+    if (!m || !m.getLayer("ward-scrim")) return;
+    const ids = [...state.selected];
+    if (!ids.length) { m.setLayoutProperty("ward-scrim", "visibility", "none"); return; }
+    m.setFilter("ward-scrim", ["all", ["==", ["get", "has_data"], true],
+      ["!", ["in", ["get", "ward_id"], ["literal", ids]]]]);
+    m.setLayoutProperty("ward-scrim", "visibility", "visible");
+  }
+
+  /* Scroll the ward list — and only the list — so a row is visible. scrollIntoView would also
+     scroll the rail, yanking the panel the planner is working in. */
+  function revealRow(row) {
+    const list = $("wardList");
+    if (!row || !list) return;
+    const head = list.querySelector(".ward-group");
+    const pad = head && row.offsetTop > head.offsetTop ? head.offsetHeight : 0;   // sticky header
+    const top = row.offsetTop, bottom = top + row.offsetHeight;
+    if (top - pad < list.scrollTop) list.scrollTop = Math.max(0, top - pad - 4);
+    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight + 6;
+  }
+
+  function armHint(ms = 9000) {
+    const h = $("mapHint");
+    if (!h) return;
+    h.classList.remove("is-gone");
+    clearTimeout(state.hintTimer);
+    state.hintTimer = setTimeout(fadeHint, ms);
+  }
+  function fadeHint() {
+    clearTimeout(state.hintTimer);
+    const h = $("mapHint");
+    if (h) h.classList.add("is-gone");
+  }
+
   function setSel(id, on) {
     const m = state.map;
     if (!m || !m.getSource || !m.getSource("wards")) return;
@@ -637,6 +831,10 @@
     if (state.selected.has(id)) { state.selected.delete(id); setSel(id, false); }
     else { state.selected.add(id); setSel(id, true); }
     renderSelection(); syncRankSelection(); analyze();
+    if (state.selected.has(id)) {
+      fadeHint();                                  // they have found the interaction
+      revealRow($("wardList").querySelector(`.ward-row[data-id="${CSS.escape(id)}"]`));
+    }
     announce(`${p.ward_name} ${state.selected.has(id) ? "added to" : "removed from"} the selection.`
       + ` ${state.selected.size} ward${state.selected.size === 1 ? "" : "s"} selected.`);
   }
@@ -650,6 +848,7 @@
   }
 
   function renderSelection() {
+    syncScrim();
     const box = $("selectionBox");
     const n = state.selected.size;
     $("clearSel").hidden = !(n || state.bbox || state.poly);
@@ -692,10 +891,14 @@
   /* ─────────────── keyboard-accessible ward list ─────────────── */
   function filteredWards() {
     const q = state.filter.trim().toLowerCase();
+    // Numbered wards first in numeric order, unnamed ones last within their group.
+    const byNumber = (a, b) => (a.ward_no || 1e9) - (b.ward_no || 1e9)
+      || String(a.ward_name).localeCompare(String(b.ward_name));
     return [...state.wards.values()]
       .filter(p => !q || (p.ward_name || "").toLowerCase().includes(q)
         || String(p.ward_no || "").includes(q))
-      .sort((a, b) => (a.ward_no || 0) - (b.ward_no || 0));
+      // Wards the model can analyse come first; the rest are grouped below, not interleaved.
+      .sort((a, b) => (b.has_data ? 1 : 0) - (a.has_data ? 1 : 0) || byNumber(a, b));
   }
 
   function renderWardList() {
@@ -705,19 +908,33 @@
       list.innerHTML = `<p class="scen-empty" style="padding:9px">No ward matches that filter.</p>`;
       return;
     }
-    list.innerHTML = rows.map((p, i) => `
+    const keep = list.scrollTop;                    // re-rendering must not snap the list to the top
+    const inert = rows.filter(p => !p.has_data).length;
+    let html = "", inertHeaderDone = false;
+    rows.forEach((p, i) => {
+      if (!p.has_data && !inertHeaderDone) {
+        inertHeaderDone = true;
+        html += `<div class="ward-group" aria-hidden="true">Outside model coverage · ${inert}
+          <span>A data gap in the climate inputs over this coastal area — not a lack of land.</span></div>`;
+      }
+      const name = escapeHtml(p.ward_name);
+      html += `
       <button class="ward-row${state.selected.has(p.ward_id) ? " is-selected" : ""}${i === state.cursor ? " is-cursor" : ""}"
               role="option" aria-selected="${state.selected.has(p.ward_id)}"
+              aria-label="${name}, ${p.has_data ? p.lst_c + " degrees" : "outside model coverage"}"
               data-id="${p.ward_id}" data-i="${i}" tabindex="-1"
-              ${p.has_data ? "" : 'aria-disabled="true"'}>
-        <span class="ward-name">${p.ward_name}</span>
+              ${p.has_data ? "" : `aria-disabled="true" title="${escapeHtml(noDataReason())}"`}>
+        <span class="ward-name">${name}</span>
         <span class="ward-t">${p.has_data ? p.lst_c + "°" : ""}</span>
-        <span class="ward-flag">${p.has_data ? "" : "no data"}</span>
-      </button>`).join("");
+        <span class="ward-flag">${p.has_data ? "" : "no coverage"}</span>
+      </button>`;
+    });
+    list.innerHTML = html;
+    list.scrollTop = keep;
     list.querySelectorAll(".ward-row").forEach(b => b.addEventListener("click", () => {
       state.cursor = +b.dataset.i;
       if (b.getAttribute("aria-disabled") === "true") {
-        toast("That ward has no land pixels — water, cloud or outside the city.");
+        toast(noDataReason());
         return;
       }
       toggleWard(b.dataset.id);
@@ -730,10 +947,9 @@
     if (!rows.length) return;
     state.cursor = Math.max(0, Math.min(rows.length - 1, state.cursor + step));
     renderWardList();
-    const el = $("wardList").querySelector(".is-cursor");
-    if (el) el.scrollIntoView({ block: "nearest" });
+    revealRow($("wardList").querySelector(".is-cursor"));
     const p = rows[state.cursor];
-    announce(`${p.ward_name}. ${p.has_data ? p.lst_c + " degrees" : "no land pixels"}.`);
+    announce(`${p.ward_name}. ${p.has_data ? p.lst_c + " degrees" : "outside model coverage"}.`);
   }
 
   function wireWardKeys() {
@@ -747,7 +963,7 @@
         const p = rows[state.cursor];
         if (!p) return;
         ev.preventDefault();
-        if (!p.has_data) return toast("That ward has no land pixels and cannot be analysed.");
+        if (!p.has_data) return toast(noDataReason());
         toggleWard(p.ward_id);
         renderWardList();
       }
@@ -769,13 +985,35 @@
     return null;
   }
 
+  /* Mirrors the headline numbers into the strip pinned to the top of the rail. */
+  function syncResultBar(s, none) {
+    const bar = $("resultBar");
+    if (!bar) return;
+    if (!s) {
+      bar.classList.add("is-idle");
+      $("rbMain").textContent = "Select an area to see it";
+      $("rbSub").textContent = "";
+      return;
+    }
+    if (none) {
+      bar.classList.add("is-idle");
+      $("rbMain").textContent = "Choose an intervention";
+      $("rbSub").textContent = `${s.mean_t_base.toFixed(1)} °C baseline`;
+      return;
+    }
+    bar.classList.remove("is-idle");
+    $("rbMain").textContent = fmtDT(s.mean_delta_t) + " °C";
+    $("rbSub").textContent = `${s.mean_t_base.toFixed(1)} → ${(s.mean_t_base + s.mean_delta_t).toFixed(1)} °C`
+      + ` · ${(s.treated_area_sqkm ?? 0).toFixed(2)} km² treated`;
+  }
+
   function resetResults() {
     ["kDelta", "kArea", "kTemp", "kBudget"].forEach(id => { $(id).textContent = "—"; });
     ["kDeltaErr", "kAreaSub", "kBest"].forEach(id => { $(id).textContent = ""; });
     $("compare").hidden = true; $("breakdown").hidden = true;
-    $("kpiCaveat").hidden = true;
     state.lastSummary = null;
     $("saveScenario").disabled = true;
+    syncResultBar(null);
   }
 
   let timer = null;
@@ -814,6 +1052,7 @@
     state.lastSummary = { summary: s, items: res.items, selection: selectionPayload(),
                           interventions: body().interventions, season: state.season };
     $("saveScenario").disabled = false;
+    syncResultBar(s, none);
 
     $("kDelta").textContent = none ? "—" : fmtDT(s.mean_delta_t) + " °C";
     $("kDeltaErr").textContent = none ? ""
@@ -832,15 +1071,6 @@
       : fmtDT(s.cooling_per_treated_km2) + " K·km²/km²";
     $("kBest").textContent = none ? "set an intervention"
       : `best: ${s.best_name} (${fmtDT(s.best_delta_t)})`;
-
-    const src = { measured: "measured per-ward roof share",
-                  measured_city: "measured city-wide roof share",
-                  user: "roof share set by you",
-                  assumed: "roof share is an UNMEASURED assumption" }[s.roof_share_source];
-    $("kpiCaveat").textContent =
-      `Baseline is measured; ΔT is modelled and scaled by ${Math.round(s.roof_share * 100)}% `
-      + `coverage (${src}). ${s.n_pixels.toLocaleString()} pixels analysed individually.`;
-    $("kpiCaveat").hidden = false;
 
     const rows = res.items.filter(i => i.ward_id !== "area");
     if (rows.length > 1) {
@@ -1164,6 +1394,7 @@
       $("mapHint").textContent = box
         ? "Drag on the map to sample a custom area"
         : "Click wards to build a scenario · drag to pan · scroll to zoom";
+      armHint();
       traceBar(0);
       // Only the rubber-band box takes over dragging. Polygon tracing keeps pan available for
       // repositioning, and tells a tap from a drag by distance instead.
@@ -1238,7 +1469,15 @@
     $("coachDone").addEventListener("click", dismissCoach);
     $("helpBtn").addEventListener("click", () => { $("coach").hidden = false; });
 
+    // The thermal-layer controls live behind a toggle so the legend card stays small.
+    $("layersToggle").addEventListener("click", () => {
+      const opening = $("layersMore").hidden;
+      $("layersMore").hidden = !opening;
+      $("layersToggle").setAttribute("aria-expanded", String(opening));
+    });
+
     wireWardKeys();
+    armHint();
 
     document.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") {
