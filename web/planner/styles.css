@@ -199,12 +199,13 @@ button{font-family:inherit}
 /* ───────────── top bar ───────────── */
 /* Map height is the scarce resource on a laptop, so the bar is kept to 56px. */
 .topbar{
-  display:flex; align-items:center; gap:14px;
-  padding:0 16px; height:56px; flex:none;
-  background:var(--surface);
-  border-bottom:1px solid var(--line);
+  display:flex; align-items:center; gap:14px; flex:none;
+  /* No fill and no hairline: the bar sits on the page ground like everything else, and its
+     14px side padding is the shell's own gutter, so the mark lines up with the map card's left
+     edge and the controls with the rail's right edge. A full-width strip with a rule under it
+     was the old pattern; here the only thing with a surface is the capsule on the right. */
+  padding:14px 14px 0;
 }
-.topbar .ghost-btn{height:34px;padding:0 15px}
 .brand{display:flex;align-items:center;gap:11px;min-width:0}
 .mark{
   width:36px;height:36px;flex:none;border-radius:11px;
@@ -222,23 +223,35 @@ button{font-family:inherit}
   display:block;font-size:10px;font-weight:500;line-height:1;text-transform:uppercase;
   letter-spacing:.11em;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-/* Only the two controls live here now, so they share one even gap. The wider group boundary this
-   used to carry separated them from the status chips, which are gone. */
-.topbar-meta{margin-left:auto;display:flex;align-items:center;gap:8px}
+/* The page controls as one floating capsule. Buttons inside it are borderless until hovered, so
+   the capsule is the single outlined object and the controls read as a set. */
+.actions{
+  margin-left:auto;display:flex;align-items:center;gap:2px;padding:4px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--pill);
+  box-shadow:var(--shadow);
+}
+.act{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  height:32px;min-width:32px;padding:0 14px;border:0;border-radius:var(--pill);
+  background:transparent;color:var(--fg-dim);font-family:inherit;font-size:13px;font-weight:500;
+  cursor:pointer;
+  transition:background-color .18s ease, color .18s ease, transform .16s var(--ease-spring);
+}
+.act svg{width:16px;height:16px;flex:none}
+.act:hover{background:var(--surface-2);color:var(--fg)}
+.act:active{transform:scale(.96)}
+.act-icon{padding:0;width:32px}
+.act:focus-visible{outline:none;box-shadow:0 0 0 2px var(--surface), 0 0 0 4px rgba(var(--accent-rgb),.6)}
+/* While the rail scrolls its cards stop 20px short of the rail box (10px padding plus the 10px
+   scrollbar gutter, see .rail), so the capsule is inset by the same amount and the right edges
+   line up. Stacked layouts have no gutter and no inset. */
+@media (min-width:1041px){ .actions{margin-right:20px} }
 
 .ghost-btn{
   background:var(--surface);border:1px solid var(--line-strong);color:var(--fg);
   padding:0 17px;height:38px;border-radius:var(--pill);font-size:13px;font-weight:500;cursor:pointer;
 }
 .ghost-btn:hover{color:var(--accent);border-color:var(--accent)}
-/* The only unlabelled buttons outside the map toolbar: a circle, so they read as a mode switch
-   rather than a truncated label.
-   Written as .ghost-btn.icon-btn, not .icon-btn: `.topbar .ghost-btn` sets padding:0 15px and
-   outranks a single class, which left a 34px button with a 2px content box. A grid item wider
-   than its area does not centre — it overflows from the start edge — so the icon sat 7px right
-   of centre. Matching that specificity is what actually zeroes the padding. */
-.ghost-btn.icon-btn{display:inline-grid;place-items:center;width:34px;padding:0;flex:none}
-.icon-btn svg{width:16px;height:16px}
 /* The toggle shows the theme it switches TO, which is why the icons swap with the theme and not
    with a class on the button — there is one source of truth for which theme is live. */
 :root[data-theme=dark] .icon-moon,
@@ -628,9 +641,10 @@ input[type=range]::-moz-range-thumb{
 
 /* ───────────── status bar ───────────── */
 .statusbar{
+  /* Flat on the ground, like the bar above it: a boxed strip under a floating header would be
+     the one leftover piece of the old chrome. */
   flex:none;display:flex;align-items:center;gap:7px;flex-wrap:wrap;
-  padding:9px 18px;border-top:1px solid var(--line);background:var(--surface);
-  font-size:11px;color:var(--muted);
+  padding:6px 14px 12px;font-size:11px;color:var(--muted);
 }
 .statusbar b{color:var(--fg-dim);font-weight:600}
 .statusbar .sep{color:var(--line-strong)}
@@ -696,7 +710,7 @@ input[type=range]::-moz-range-thumb{
   .spinner{animation-duration:2.4s}
   .sld-sheen,.sld-halo,.status-dot{animation:none}
   .sld-sheen{opacity:0}
-  .readout,.ro-span,.ro-tick,.sld-fill,.sld-halo,.cmp-fill,.rank-row,
+  .act,.readout,.ro-span,.ro-tick,.sld-fill,.sld-halo,.cmp-fill,.rank-row,
   .ghost-btn,.primary-btn,.tool,.seg,.preset,.link-btn{transition-duration:.01ms}
   .ghost-btn:hover,.primary-btn:hover,.tool:hover,.preset:hover,.rank-row:hover{transform:none}
 }
@@ -871,7 +885,7 @@ input[type=range]::-moz-range-thumb{
   .toast{bottom:78px}
 }
 @media (max-width:560px){
-  .topbar{height:auto;padding:11px 13px;flex-wrap:wrap;gap:9px}
+  .topbar{padding:10px 10px 0;flex-wrap:wrap;gap:9px}
   .brand-org{display:none}
   .shell{padding:10px;gap:10px}
   .panel{padding:15px 14px}
@@ -885,9 +899,9 @@ input[type=range]::-moz-range-thumb{
   .tool-sep{display:none}
   /* 44px is the floor for a touch target, and a fatter thumb needs a taller track */
   .ghost-btn,.preset,.tool{height:44px}
-  /* .topbar .ghost-btn pins its pills to 34px, which the labelled ones can carry. An unlabelled
-     circle cannot: it is the hardest target in the bar, so it takes the touch floor. */
-  .topbar .ghost-btn.icon-btn{width:44px;height:44px}
+  /* the capsule's buttons take the touch floor too */
+  .act{height:44px;min-width:44px}
+  .act-icon{width:44px}
   .sld,.sld input[type=range]{height:40px}
   .sld-rail,.sld-fill{top:15px}
   .sld input[type=range]::-webkit-slider-runnable-track{height:40px}
@@ -917,7 +931,7 @@ input[type=range]::-moz-range-thumb{
   .shell{display:block;min-height:0;padding:0;gap:0}
   .stage{height:auto;min-height:0;page-break-inside:avoid;border-radius:0;border:0}
   .map{position:relative;height:420px}
-  .toolbar,.layers,.hint,.box-draw,.toast,.ghost-btn,.link-btn,
+  .toolbar,.layers,.hint,.box-draw,.toast,.ghost-btn,.actions,.link-btn,
   .mapboxgl-ctrl,.presets,.sld,input[type=range],.status-dot,
   .coach,.search,.wardlist,.segmented,.scen-actions,.scen-pick,.scen-del,
   .select,.legend-inert,.readout,.layers-toggle,.layers-more{display:none!important}

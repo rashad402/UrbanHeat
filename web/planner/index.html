@@ -63,10 +63,11 @@
       <span class="brand-org">Kochi Municipal Corporation</span>
     </div>
   </div>
-  <div class="topbar-meta">
-    <!-- Shows the theme it switches TO. Both icons ship; styles.css reveals the right one from
-         data-theme, so the button cannot disagree with the live theme. -->
-    <button class="ghost-btn icon-btn" id="themeBtn" aria-pressed="false">
+  <!-- One floating capsule instead of two loose buttons at the far edge of a full-width bar.
+       The theme toggle shows the theme it switches TO. Both icons ship; styles.css reveals the
+       right one from data-theme, so the button cannot disagree with the live theme. -->
+  <div class="actions" role="group" aria-label="Page controls">
+    <button class="act act-icon" id="themeBtn" aria-pressed="false">
       <svg class="icon-moon" viewBox="0 0 16 16" aria-hidden="true">
         <!-- Shifted +0.5,-0.8 from the obvious coordinates: a crescent's bounding box is not
              centred on the circle it is cut from, so the drawn ink sat low and left of the
@@ -80,7 +81,14 @@
               stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
       </svg>
     </button>
-    <button class="ghost-btn" id="aboutBtn" aria-haspopup="dialog">Method</button>
+    <button class="act" id="aboutBtn" aria-haspopup="dialog">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M8 7.3v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="8" cy="5.1" r=".9" fill="currentColor"/>
+      </svg>
+      <span>Method</span>
+    </button>
   </div>
 </header>
 
