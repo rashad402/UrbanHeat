@@ -65,7 +65,28 @@
     hintTimer: null,
   };
 
-  const fail = (html) => { $("stageLoading").innerHTML = html; $("stageLoading").hidden = false; };
+  // Tell the opening scene the app has something to show. Called when the map has loaded, and also
+  // on every path where it never will — in those the planner needs to read the failure message, not
+  // wait behind a splash. The scene still plays out its minimum time first; see intro.js.
+  const introReady = () => { try { if (window.UrbanIntro) window.UrbanIntro.ready(); } catch { /* cosmetic */ } };
+
+  /* "Layers added" is NOT "something to look at": the basemap and the Earth Engine heat layer are
+     only REQUESTED at that point and take seconds to arrive. Lifting the scene then showed an empty
+     grey map that filled in behind it. Mapbox fires "idle" once every tile asked for so far has
+     arrived (or failed), which is the moment there is a picture. The ceiling means a stalled tile
+     server can delay the scene but never trap it; intro.js adds its own minimum and hold on top. */
+  const SETTLE_MAX_MS = 12000;
+  function settleThenIntroReady(map) {
+    let done = false;
+    const go = () => { if (!done) { done = true; introReady(); } };
+    map.once("idle", go);
+    setTimeout(go, SETTLE_MAX_MS);
+  }
+
+  const fail = (html) => {
+    $("stageLoading").innerHTML = html; $("stageLoading").hidden = false;
+    introReady();
+  };
   const announce = (msg) => { $("liveRegion").textContent = msg; };
 
   /* ─────────────── theme ───────────────
@@ -330,6 +351,7 @@
       layersAdded = true;
       addLayers(map, meta, wards);
       $("stageLoading").hidden = true;
+      settleThenIntroReady(map);
     };
     map.on("load", ready);
     map.on("style.load", ready);

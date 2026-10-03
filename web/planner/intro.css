@@ -1,0 +1,149 @@
+/* UrbanHeat Planner — opening scene.
+
+   A starfield, a planet limb with an atmosphere, the wordmark, and a loader that sweeps through
+   the product's own thermal ramp. It is also the real loading screen: it holds until the map is
+   ready (intro.js), then the planet "descends" and the scene dissolves into the app.
+
+   This is a SCENE, not chrome, so it is dark and literal in BOTH themes — space does not follow
+   the interface theme, and none of these colours are tokens on purpose. The loader gradient
+   repeats PALETTE from api/planner.py because the overlay paints before /api/meta has arrived.
+
+   Skipped when <html> has .no-intro (set in the head: seen this session, ?intro=0, or the user
+   prefers reduced motion). */
+
+.no-intro .intro{display:none}
+
+.intro{
+  position:fixed;inset:0;z-index:100;overflow:hidden;
+  background:#03050a;color:#eef2f8;
+  font-family:var(--font-ui);
+  cursor:pointer;
+  will-change:opacity;
+}
+/* Everything that moves is promoted to its own layer up front and animates only transform and
+   opacity (the wordmark's blur is the one filter, on a small element). The planet is a ~2000px
+   circle with wide blooms; as a plain element it would be re-rasterised on every frame of a
+   scale, which is what made the old exit stutter. As its own isolated layer it is painted once
+   and then only moved. */
+.intro-sky,.intro-center,.intro-milky{will-change:transform,opacity}
+.intro-planet{will-change:transform,opacity;isolation:isolate;backface-visibility:hidden}
+
+/* ───────────── sky ───────────── */
+.intro-sky{position:absolute;inset:-4%;animation:intro-drift 60s linear infinite alternate}
+.intro-stars{position:absolute;inset:0;width:100%;height:100%;display:block;
+  opacity:0;animation:intro-fade 1.6s ease .1s forwards}
+/* the Milky Way: a soft diagonal band, like the one crossing the reference */
+.intro-milky{
+  position:absolute;inset:-25%;pointer-events:none;filter:blur(34px);opacity:0;
+  background:
+    linear-gradient(115deg, transparent 28%, rgba(110,125,170,.10) 42%, rgba(165,160,205,.18) 51%,
+                    rgba(110,125,170,.09) 60%, transparent 73%),
+    radial-gradient(ellipse 40% 14% at 38% 56%, rgba(190,170,150,.10), transparent 70%);
+  animation:intro-fade 2.4s ease .3s forwards;
+}
+@keyframes intro-drift{from{transform:translate3d(0,0,0) scale(1)}to{transform:translate3d(-1.2%,.8%,0) scale(1.04)}}
+@keyframes intro-fade{to{opacity:1}}
+
+/* ───────────── planet ───────────── */
+/* A huge circle, positioned so only its upper-left limb crosses the frame: the arc rises from the
+   lower left to the right edge, as in the reference. --S is the diameter; the centre sits at 90vw
+   so the curve is gentle on a wide screen and still crosses a phone. */
+.intro-planet{
+  --S:max(150vw,120vh);
+  position:absolute;width:var(--S);height:var(--S);
+  left:calc(90vw - var(--S) / 2);top:46vh;border-radius:50%;
+  background:
+    radial-gradient(ellipse 70% 15% at 42% 0%, rgba(150,128,122,.46), rgba(88,86,112,.22) 52%, transparent 100%),
+    radial-gradient(circle at 40% 10%, #2a2e42 0%, #121828 30%, #080c16 56%, #04060b 80%);
+  transform:translateY(7%) scale(1);transform-origin:40% 0%;opacity:0;
+  animation:intro-rise 2.4s cubic-bezier(.16,.84,.3,1) .35s forwards;
+}
+@keyframes intro-rise{to{transform:translateY(0) scale(1);opacity:1}}
+
+/* terrain and cloud texture: fractal noise, tinted warm, fading away from the limb */
+.intro-terrain{
+  position:absolute;inset:0;border-radius:50%;mix-blend-mode:soft-light;opacity:1;
+  background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='900' height='900'><filter id='n' x='0' y='0' width='100%25' height='100%25'><feTurbulence type='fractalNoise' baseFrequency='.0055 .011' numOctaves='5' seed='11'/><feColorMatrix values='0 0 0 0 .86  0 0 0 0 .62  0 0 0 0 .50  0 0 0 2.4 -.85'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>") center/100% 100%;
+  -webkit-mask-image:linear-gradient(to bottom,#000 0,rgba(0,0,0,.7) 10%,transparent 30%);
+          mask-image:linear-gradient(to bottom,#000 0,rgba(0,0,0,.7) 10%,transparent 30%);
+}
+/* the atmosphere: a bright hairline rim, then a wide blue bloom that is strongest at the limb */
+.intro-atmo{
+  position:absolute;inset:-1px;border-radius:50%;pointer-events:none;
+  box-shadow:
+    0 0 0 1px rgba(170,208,255,.55),
+    0 -3px 12px 1px rgba(125,180,255,.85),
+    0 -16px 60px 6px rgba(70,130,255,.55),
+    0 -60px 180px 24px rgba(40,90,220,.30),
+    inset 0 10px 22px -4px rgba(150,198,255,.65),
+    inset 0 46px 120px -16px rgba(80,130,235,.38);
+}
+/* Kochi: a hot spot on the limb. The one warm point in a cold scene, and the one place the
+   thermal ramp shows up outside the data. Its position comes from rotating a wrapper about the
+   planet's centre, which places it ON the arc at any viewport size. */
+.intro-orbit{position:absolute;inset:0;transform:rotate(-17deg);pointer-events:none}
+.intro-marker{
+  position:absolute;left:50%;top:1.15%;width:9px;height:9px;margin-left:-4.5px;border-radius:50%;
+  background:#ffd27a;opacity:0;
+  box-shadow:0 0 10px 3px rgba(255,170,90,.95), 0 0 34px 10px rgba(244,109,67,.55);
+  animation:intro-fade 1s ease 2.2s forwards;
+}
+.intro-marker::after{
+  content:"";position:absolute;inset:-9px;border-radius:50%;
+  border:1.5px solid rgba(255,190,120,.8);opacity:0;
+  animation:intro-ping 2.4s ease-out 2.4s infinite;
+}
+@keyframes intro-ping{0%{transform:scale(.4);opacity:.9}100%{transform:scale(3.2);opacity:0}}
+
+/* ───────────── wordmark ───────────── */
+.intro-center{
+  position:absolute;left:0;right:0;top:44%;transform:translateY(-50%);
+  display:flex;flex-direction:column;align-items:center;gap:20px;padding:0 24px;text-align:center;
+}
+.intro-word{
+  margin:0;font-size:clamp(34px,5.4vw,66px);font-weight:600;letter-spacing:-.03em;line-height:1;
+  color:#f3f6fb;white-space:nowrap;text-shadow:0 2px 40px rgba(0,0,0,.6);
+  opacity:0;transform:translateY(10px);filter:blur(10px);
+  animation:intro-word 1.4s cubic-bezier(.2,.7,.2,1) .8s forwards;
+}
+.intro-word em{font-style:normal;font-weight:300;color:#cfd6e2;margin-left:.3em;letter-spacing:-.02em}
+@keyframes intro-word{to{opacity:1;transform:none;filter:none}}
+.intro-cap{
+  margin:0;font-size:11.5px;font-weight:500;letter-spacing:.3em;text-transform:uppercase;
+  color:rgba(214,223,238,.66);opacity:0;animation:intro-fade 1.2s ease 1.7s forwards;
+}
+
+/* the loader: a short comet sweeping through the thermal ramp along a faint track */
+.intro-load{
+  position:relative;width:170px;height:2px;border-radius:2px;overflow:hidden;
+  background:rgba(255,255,255,.12);opacity:0;animation:intro-fade 1s ease 1.3s forwards;
+}
+.intro-load i{
+  position:absolute;top:0;bottom:0;left:0;width:40%;border-radius:2px;
+  background:linear-gradient(90deg,#313695,#4575b4,#74add1,#abd9e9,#fee090,#fdae61,#f46d43,#d73027,#a50026);
+  animation:intro-sweep 1.5s cubic-bezier(.5,0,.3,1) infinite;
+}
+@keyframes intro-sweep{0%{transform:translateX(-100%)}100%{transform:translateX(270%)}}
+/* ready: the comet stops and fills the whole track */
+.intro.is-ready .intro-load i{animation:none;width:100%;transform:none;transition:width .5s ease}
+
+.intro-hint{
+  position:absolute;left:0;right:0;bottom:26px;text-align:center;font-size:11px;letter-spacing:.14em;
+  text-transform:uppercase;color:rgba(214,223,238,.5);opacity:0;animation:intro-fade 1s ease 2.4s forwards;
+}
+
+/* ───────────── exit ─────────────
+   The choreography is a single Web Animations timeline in intro.js. Here the scene is only made
+   unclickable while it plays out. Doing this with a CSS class and four independent transitions
+   gave four different durations and easings that never agreed with each other. */
+.intro.is-leaving{pointer-events:none}
+
+/* On a tall, narrow screen the limb crosses the middle of the frame, which is where the centred text
+   stack would land, so it moves up into the open sky and the Kochi marker sits below the loader
+   rather than on top of it. */
+@media (max-aspect-ratio:4/5){
+  .intro-center{top:31%}
+}
+
+@media print{.intro{display:none!important}}
+@media (prefers-reduced-motion:reduce){.intro{display:none}}

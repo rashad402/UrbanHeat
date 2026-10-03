@@ -10,7 +10,24 @@
 <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
+<script>
+  /* The opening scene plays once per browser session. It is skipped (no-intro) when it has already
+     played, when ?intro=0 is given, or when the visitor prefers reduced motion; ?intro=1 forces it.
+     This has to be inline and synchronous: decided any later, the app paints first and the scene
+     then slams over it. A storage error is not a reason to hide it, so it plays by default. */
+  (() => {
+    let skip = false;
+    try {
+      const q = new URLSearchParams(location.search).get("intro");
+      const seen = sessionStorage.getItem("urbanheat.intro.v1") === "1";
+      const calm = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+      skip = q === "0" || (q !== "1" && (seen || calm));
+    } catch (e) { /* storage unavailable: play it */ }
+    if (skip) document.documentElement.classList.add("no-intro");
+  })();
+</script>
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="intro.css">
 <script>
   /* Resolve the theme BEFORE first paint. This has to be inline and synchronous: doing it in
      app.js — which loads at the end of <body> — paints the light theme first and then flips it,
@@ -28,6 +45,26 @@
 </script>
 </head>
 <body>
+
+<!-- Opening scene. Decorative and aria-hidden: it is a loading screen, and the app behind it is made
+     inert by intro.js while it is up. The Kochi marker sits on the planet's limb. -->
+<div class="intro" id="intro" aria-hidden="true">
+  <div class="intro-sky">
+    <canvas class="intro-stars" id="introStars"></canvas>
+    <div class="intro-milky"></div>
+  </div>
+  <div class="intro-planet">
+    <span class="intro-terrain"></span>
+    <span class="intro-atmo"></span>
+    <span class="intro-orbit"><span class="intro-marker"></span></span>
+  </div>
+  <div class="intro-center">
+    <div class="intro-word">UrbanHeat<em>Planner</em></div>
+    <p class="intro-cap">Kochi, Kerala &middot; 9.97&deg;N 76.28&deg;E</p>
+    <div class="intro-load"><i></i></div>
+  </div>
+  <p class="intro-hint">Click or press any key to skip</p>
+</div>
 
 <header class="topbar">
   <div class="brand">
@@ -410,6 +447,7 @@
   </div>
 </dialog>
 
+<script src="intro.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
