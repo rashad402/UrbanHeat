@@ -14,17 +14,17 @@
    The active theme is data-theme on <html>, set before first paint by the inline script in
    index.html: a stored choice first, the OS preference otherwise. */
 
-/* WHY THE CHROME IS HUELESS AND THE ACCENT IS VIOLET — measured, not preference.
-   Data owns almost the entire colour wheel here. The thermal ramp runs 346°→237° (every red,
-   orange, yellow, cyan and blue), and the satellite imagery is green and olive. The chrome used
-   to be teal: accent 167°, surfaces 169° — and the ward "predicted cooling" ramp is 168–170°.
-   Three degrees apart. In ΔT mode the map painted wards in the exact colour the interface used
-   for "this control is active", and the green-cast panels shared a hue family with the imagery
-   they were supposed to frame, so the cards never receded. (addLayers already half-knew this: the
-   ward outline is white because a teal one "read as a patch of cool ground".)
-   That leaves violet/magenta (~260–320°) and neutral grey as the only unclaimed bands. So the
-   surfaces are hueless and the accent sits at 271°, where no data layer can ever reach it.
-   The thermal and cooling ramps are untouched: they are data and they keep their meaning. */
+/* WHY THE INTERFACE HAS NO COLOUR OF ITS OWN — measured, not preference.
+   Data owns almost the whole colour wheel here. The thermal ramp runs 346 to 237 degrees (every
+   red, orange, yellow, cyan and blue), the ward "predicted cooling" ramp is teal, and the
+   satellite imagery is green and olive. Any hue the chrome picks lands on top of one of them: a
+   teal interface was within three degrees of the cooling ramp, and the violet that replaced it
+   was only free by luck. The cleaner answer is to stop competing. Surfaces are hueless, and the
+   "accent" is INK: near-black in the light theme, near-white in the dark one. An active control
+   is a solid ink pill, a focus ring is an ink ring, and the only colour left on screen is the
+   map, which is the only place colour carries meaning.
+   The --accent-* tokens keep their names so each use stays a single token, but they resolve to
+   ink. The thermal and cooling ramps are untouched: they are data and they keep their meaning. */
 
 :root{
   /* surfaces — neutral, so the imagery is the only coloured thing in the frame */
@@ -46,15 +46,19 @@
   --muted:#5c636e;    /*  5.9:1 on white · 5.5:1 on --surface-2 · 5.0:1 on --surface-3 */
   --faint:#8a919c;    /*  3.2:1 — borders and decoration ONLY, never text */
 
-  /* accent = interactive. NOT cooling: cooling is a data colour and lives on the map. */
-  --accent:#6d28d9;        /* 7.1:1 on white */
-  --accent-bright:#a78bfa; /* gradient tail only — never carries text */
-  --accent-soft:rgba(109,40,217,.09);
+  /* accent = ink. Interactive and selected states are solid ink, never a hue. */
+  --accent:#14161b;        /* 15.9:1 on white */
+  --accent-bright:#4a505a; /* gradient tail only — never carries text */
+  --accent-soft:rgba(20,22,27,.07);
   --accent-ink:#ffffff;    /* text ON an accent fill — inverts with the accent */
-  --accent-hover:#5b21b6;
+  --accent-hover:#2b3038;
+  /* Slider fills and comparison bars. Their own tokens rather than --accent, because the slider
+     knob is light in both themes and has to stay distinguishable from the fill it sits on. */
+  --bar-a:#14161b;
+  --bar-b:#5a616c;
   /* The accent as raw channels. Focus rings and the halo keyframes need the alpha to vary across
      stops, which a flat colour token cannot do: rgba(var(--accent-rgb),.24) can. */
-  --accent-rgb:109,40,217;
+  --accent-rgb:20,22,27;
   --hot:#b83820;           /* 6.2:1 */
   --warn:#8a6410;          /* 5.1:1 */
   --on-hot:#ffffff;        /* text on a --hot fill */
@@ -102,9 +106,8 @@
 /* ───────────── dark ─────────────
    Not the light theme with its lightness inverted. The ground is a hueless near-black, so the
    satellite imagery is the only coloured thing on screen and the map card separates from it
-   cleanly. The accent has to climb to stay legible — #6d28d9 is 2.0:1 here — so violet lightens
-   to 271° at a higher value, which in turn flips the ink ON an accent fill from white to
-   near-black. Shadows stop doing the separating (they are invisible here) and the borders take
+   cleanly. The ink flips to near-white, which in turn flips the text ON an accent fill from
+   white to near-black. Shadows stop doing the separating (they are invisible here) and the borders take
    over, so --line is a step lighter than its light-theme counterpart rather than a step darker.
    Ratios below are measured against --surface (#141619). */
 :root[data-theme=dark]{
@@ -124,12 +127,14 @@
   --muted:#8b95a1;    /*  6.0:1 · 5.5:1 on --surface-2 · 5.0:1 on --surface-3 */
   --faint:#5b646e;    /*  2.7:1 — decoration ONLY, never text */
 
-  --accent:#a78bfa;        /* 6.7:1 · 5.6:1 on --surface-3 */
-  --accent-bright:#cbb9ff;
-  --accent-soft:rgba(167,139,250,.14);
-  --accent-ink:#17102e;    /* 6.7:1 on the accent fill */
-  --accent-hover:#bda4ff;
-  --accent-rgb:167,139,250;
+  --accent:#e9ecf0;        /* 15.3:1 · 12.4:1 on --surface-3 */
+  --accent-bright:#ffffff;
+  --accent-soft:rgba(233,236,240,.09);
+  --accent-ink:#0c0d10;    /* 15.3:1 on the accent fill */
+  --accent-hover:#ffffff;
+  --accent-rgb:233,236,240;
+  --bar-a:#59616c;
+  --bar-b:#aab3bd;
   --hot:#ff8f72;           /* 8.1:1 */
   --warn:#e0b457;          /* 9.4:1 */
   --on-hot:#2a0d05;        /* 7.9:1 on a --hot fill */
@@ -423,7 +428,7 @@ input[type=range]::-moz-range-thumb{
 .sld-fill{
   position:absolute;left:0;top:12px;height:10px;border-radius:var(--pill);overflow:hidden;
   width:calc(13px + (100% - 26px) * var(--p));
-  background:linear-gradient(90deg,var(--accent),var(--accent-bright));
+  background:linear-gradient(90deg,var(--bar-a),var(--bar-b));
   transition:width .34s var(--ease-out);
 }
 .sld-sheen{
@@ -588,7 +593,7 @@ input[type=range]::-moz-range-thumb{
 .cmp-row{display:grid;grid-template-columns:92px 1fr 56px;align-items:center;gap:10px;padding:4px 0}
 .cmp-name{font-size:12.5px;color:var(--fg-dim)}
 .cmp-track{height:8px;background:var(--line-soft);border-radius:var(--pill);overflow:hidden}
-.cmp-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-bright));
+.cmp-fill{height:100%;background:linear-gradient(90deg,var(--bar-a),var(--bar-b));
   border-radius:var(--pill);transition:width .5s var(--ease-out)}
 .cmp-val{font-family:var(--font-mono);font-size:12.5px;text-align:right;color:var(--accent);font-weight:500}
 
@@ -920,8 +925,8 @@ input[type=range]::-moz-range-thumb{
         --bg:#fff;--surface:#fff;--surface-2:#fff;--surface-3:#fff;--fg:#111;
         --fg-dim:#222;--muted:#555;--faint:#777;--line:#ccc;--line-soft:#e3e3e3;
         --line-strong:#bbb;
-        --accent:#5b21b6;--accent-bright:#5b21b6;--accent-soft:#fff;
-        --accent-ink:#fff;--accent-hover:#5b21b6;--accent-rgb:91,33,182;
+        --accent:#111;--accent-bright:#444;--accent-soft:#fff;--bar-a:#222;--bar-b:#555;
+        --accent-ink:#fff;--accent-hover:#111;--accent-rgb:17,17,17;
         --hot:#9a2c14;--warn:#6b4c08;--on-hot:#fff;
         --knob:#fff;--knob-line:#999;--knob-shadow:none;--sheen:transparent;
         --hatch:rgba(0,0,0,.25);--veil:transparent;--inset:none;--scroll-thumb:#999;
