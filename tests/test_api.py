@@ -258,6 +258,29 @@ def main():
             "interventions": {"albedo_set": 0.5}})
         check("degenerate polygon returns 400", badpoly.status_code == 400)
 
+        # a bow-tie: corners given in column order, so the diagonals cross
+        bow = client.post("/api/analyze", json={
+            "selection": {"kind": "polygon",
+                          "coordinates": [[76.25, 9.97], [76.25, 9.95], [76.27, 9.97], [76.27, 9.95]]},
+            "interventions": {"albedo_set": 0.5}})
+        check("self-crossing zone is refused with a readable 400",
+              bow.status_code == 400 and "crosses itself" in bow.json().get("detail", ""),
+              f"HTTP {bow.status_code}: {bow.json().get('detail', '')[:60]}")
+        # the same four corners in order are fine, and so is a concave L drawn on purpose
+        square = client.post("/api/analyze", json={
+            "selection": {"kind": "polygon",
+                          "coordinates": [[76.25, 9.97], [76.25, 9.95], [76.27, 9.95], [76.27, 9.97]]},
+            "interventions": {"albedo_set": 0.5}})
+        ell = client.post("/api/analyze", json={
+            "selection": {"kind": "polygon",
+                          "coordinates": [[76.25, 9.95], [76.28, 9.95], [76.28, 9.96],
+                                          [76.26, 9.96], [76.26, 9.98], [76.25, 9.98]]},
+            "interventions": {"albedo_set": 0.5}})
+        check("the same corners in order are accepted", square.status_code == 200,
+              f"HTTP {square.status_code}")
+        check("a concave (L-shaped) zone is accepted, not mistaken for a crossing",
+              ell.status_code == 200, f"HTTP {ell.status_code}")
+
         fake_ee.SAMPLE_ROWS = []
         empty = post(client, "/api/analyze", albedo=0.5, bbox=[76.0, 9.0, 76.01, 9.01])
         check("empty drawn area returns 422, not a 500",

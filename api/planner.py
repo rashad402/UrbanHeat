@@ -556,6 +556,33 @@ def _pixel_response(frame, iv):
     }
 
 
+def _ring_self_intersects(ring):
+    """True if two non-adjacent edges of the ring properly cross (a bow-tie).
+
+    The browser untangles a traced zone before sending it, so this is the backstop for anything
+    else that posts a polygon: a self-crossing ring has no well-defined area, and Earth Engine may
+    reject it or fill it by a rule the planner did not intend.
+    """
+    pts = ring[:-1] if len(ring) > 1 and ring[0] == ring[-1] else ring
+    n = len(pts)
+
+    def orient(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    def cross(p1, p2, p3, p4):
+        d1, d2 = orient(p3, p4, p1), orient(p3, p4, p2)
+        d3, d4 = orient(p1, p2, p3), orient(p1, p2, p4)
+        return ((d1 > 0 > d2) or (d1 < 0 < d2)) and ((d3 > 0 > d4) or (d3 < 0 < d4))
+
+    for i in range(n):
+        for j in range(i + 2, n):
+            if i == 0 and j == n - 1:
+                continue                      # the closing edge is adjacent to edge 0
+            if cross(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n]):
+                return True
+    return False
+
+
 def _drawn_region(sel):
     """Earth Engine geometry for a drawn selection, plus its centre (lon, lat).
 
@@ -575,6 +602,10 @@ def _drawn_region(sel):
         raise HTTPException(400, "polygon coordinates must be [lon, lat] pairs")
     if ring[0] != ring[-1]:
         ring = ring + [ring[0]]
+    if _ring_self_intersects(ring):
+        raise HTTPException(
+            400, "That zone's outline crosses itself, so its area is ambiguous. Place the corners "
+                 "in order around the edge, or let the map reorder them.")
     cx = sum(p[0] for p in ring[:-1]) / (len(ring) - 1)
     cy = sum(p[1] for p in ring[:-1]) / (len(ring) - 1)
     return ee.Geometry.Polygon([ring]), (cx, cy)
@@ -649,8 +680,9 @@ def analyze(req: AnalyzeRequest):
         rows = [r for r in rows if r.get("lst") is not None]
         if not rows:
             raise HTTPException(
-                422, "No usable pixels in that area. It is most likely open water or was cloudy "
-                     "in every scene — both are masked out of the land-surface record.")
+                422, "No usable pixels in that area. It may lie outside the Kochi study area, be open "
+                     "water, or have been cloudy in every scene — all of these are absent from the "
+                     "land-surface record.")
 
         frame = pd.DataFrame(rows)
         for c in INPUT_COLUMNS:

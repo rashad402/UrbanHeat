@@ -276,8 +276,19 @@ button{font-family:inherit}
   border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-float);
 }
 .map{position:absolute;inset:0}
-.map.is-drawing .mapboxgl-canvas,
-.map.is-drawing .mapboxgl-canvas-container{cursor:crosshair}
+/* A plus while placing points or dragging a box, never a hand. Mapbox sets `grab` on its canvas
+   container and `grabbing` on :active, which is what a click that pins a point triggered. The
+   Zone tool only ever styled the outer #map div, which sits UNDER that container, so the hand won
+   outright. Both states are overridden, and with !important because Select's hover also writes an
+   inline cursor. The plus is dark-outlined white so it reads on satellite and on any thermal
+   colour; the hotspot is its centre. */
+.map{
+  --cursor-plus:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'><path d='M14 4v20M4 14h20' stroke='%230b0d12' stroke-width='4.4' stroke-linecap='round'/><path d='M14 4v20M4 14h20' stroke='white' stroke-width='2' stroke-linecap='round'/></svg>") 14 14, crosshair;
+}
+.map.is-drawing .mapboxgl-canvas, .map.is-drawing .mapboxgl-canvas-container,
+.map.is-drawing .mapboxgl-canvas-container:active,
+.map.is-tracing .mapboxgl-canvas, .map.is-tracing .mapboxgl-canvas-container,
+.map.is-tracing .mapboxgl-canvas-container:active{cursor:var(--cursor-plus) !important}
 
 /* rubber-band selection box (screen space, converted to lng/lat on release) */
 .box-draw{
@@ -853,7 +864,6 @@ input[type=range]::-moz-range-thumb{
 .dlg-facts dd{margin:0;font-family:var(--font-mono);font-size:11.5px}
 
 /* ───────────── drawn polygon ───────────── */
-.map.is-tracing{cursor:crosshair}
 .hint-trace{display:flex;align-items:center;gap:10px}
 .hint-trace .link-btn{font-size:11px}
 .hint-trace .link-btn[disabled]{opacity:.4;cursor:not-allowed}

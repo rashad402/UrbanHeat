@@ -722,30 +722,86 @@
     map.on("dblclick", () => { if (state.tool === "polygon") finishPolygon(); });
   }
 
+  /* ───────────── zone hygiene: a zone must not cross itself ─────────────
+     Click the four corners of a box in column order and the outline is a bow-tie: two edges cross,
+     the "area" is ambiguous, and Earth Engine is handed a polygon it may reject or fill oddly.
+     So a traced ring is untangled before it is drawn or sent.
+
+     Untangling is 2-opt: while two edges cross, reverse the run of corners between them. Each
+     such move strictly shortens the outline, so it always terminates, and it changes as little of
+     the planner's order as it can, which matters because a ring that is ALREADY simple, including
+     a concave one drawn on purpose, is returned exactly as clicked. Sorting by angle around the
+     centroid would also untangle it, but it would quietly reshape every L- and U-shaped zone. */
+  const orient = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const edgesCross = (p1, p2, p3, p4) => {
+    const d1 = orient(p3, p4, p1), d2 = orient(p3, p4, p2);
+    const d3 = orient(p1, p2, p3), d4 = orient(p1, p2, p4);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  };
+  function firstCrossing(ring) {
+    const n = ring.length;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 2; j < n; j++) {
+        if (i === 0 && j === n - 1) continue;              // the closing edge touches edge 0
+        if (edgesCross(ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])) return [i, j];
+      }
+    }
+    return null;
+  }
+  function convexHull(pts) {                                // fallback only: always a simple polygon
+    const p = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const half = (arr) => {
+      const h = [];
+      for (const q of arr) {
+        while (h.length >= 2 && orient(h[h.length - 2], h[h.length - 1], q) <= 0) h.pop();
+        h.push(q);
+      }
+      h.pop();
+      return h;
+    };
+    return half(p).concat(half([...p].reverse()));
+  }
+  function untangle(pts) {
+    if (pts.length < 4) return pts.slice();                 // three points cannot cross
+    const ring = pts.slice();
+    for (let guard = 0; guard < 400; guard++) {
+      const x = firstCrossing(ring);
+      if (!x) return ring;
+      const [i, j] = x;
+      const run = ring.slice(i + 1, j + 1).reverse();
+      ring.splice(i + 1, run.length, ...run);
+    }
+    return convexHull(pts);                                 // pathological input: still simple
+  }
+  const reorderedFrom = (fixed, raw) => fixed.length === raw.length && fixed.some((p, i) => p !== raw[i]);
+
   /* Draw a ring on the map. `withVertices` is false for a committed zone, where the vertex
      handles would only be visual noise. */
-  function drawRing(pts, withVertices) {
+  function drawRing(pts, withVertices, shape = pts) {
     const map = state.map;
     if (!map || !map.getSource("draw")) return;
+    // Vertex handles sit where the planner clicked; the outline follows the untangled shape.
     const feats = withVertices
       ? pts.map(c => ({ type: "Feature", geometry: { type: "Point", coordinates: c } }))
       : [];
-    if (pts.length >= 2) {
-      feats.push({ type: "Feature", geometry: { type: "LineString", coordinates: pts } });
+    if (shape.length >= 2) {
+      feats.push({ type: "Feature", geometry: { type: "LineString", coordinates: shape } });
     }
-    if (pts.length >= 3) {
+    if (shape.length >= 3) {
       feats.push({ type: "Feature",
-        geometry: { type: "Polygon", coordinates: [[...pts, pts[0]]] } });
+        geometry: { type: "Polygon", coordinates: [[...shape, shape[0]]] } });
     }
     map.getSource("draw").setData({ type: "FeatureCollection", features: feats });
   }
 
   function renderTracing() {
-    drawRing(state.tracing, true);
-    traceBar(state.tracing.length);
+    // Show the shape that will actually be analysed, so a bow-tie never appears on screen.
+    const shape = untangle(state.tracing);
+    drawRing(state.tracing, true, shape);
+    traceBar(state.tracing.length, reorderedFrom(shape, state.tracing));
   }
 
-  function traceBar(n) {
+  function traceBar(n, reordered) {
     let bar = $("traceBar");
     if (!bar) {
       bar = document.createElement("div");
@@ -756,7 +812,7 @@
     bar.hidden = state.tool !== "polygon";
     bar.innerHTML = n === 0
       ? `Tap or click each corner of the zone`
-      : `<span>${n} point${n > 1 ? "s" : ""}</span>
+      : `<span>${n} point${n > 1 ? "s" : ""}${reordered ? " · uncrossed" : ""}</span>
          <button class="link-btn" id="traceFinish" ${n < 3 ? "disabled" : ""}>Finish</button>
          <button class="link-btn" id="traceUndo">Undo</button>
          <button class="link-btn" id="traceCancel">Cancel</button>`;
@@ -770,11 +826,14 @@
     if (state.tracing.length < 3) return toast("A zone needs at least three points.");
     clearWardSelection();
     state.bbox = null; $("boxDraw").hidden = true;
-    state.poly = state.tracing.slice();
+    const fixed = untangle(state.tracing);
+    const reordered = reorderedFrom(fixed, state.tracing);
+    state.poly = fixed;
     state.tracing = [];
     drawRing(state.poly, false);
     traceBar(0);
     renderSelection(); analyze();
+    if (reordered) toast("Corners reordered so the zone does not cross itself.");
   }
 
   function cancelTracing() {
@@ -1425,6 +1484,9 @@
       b.classList.add("is-active");
       cancelTracing();
       state.tool = b.dataset.tool;
+      // The Select tool's hover writes an inline cursor (pointer / not-allowed) that would
+      // otherwise outlast the switch and sit on top of the drawing cursor.
+      if (state.map) state.map.getCanvas().style.cursor = "";
       const box = state.tool === "draw", poly = state.tool === "polygon";
       $("map").classList.toggle("is-drawing", box);
       $("map").classList.toggle("is-tracing", poly);
