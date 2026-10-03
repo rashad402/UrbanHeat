@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36">
+  <defs>
+    <radialGradient id="h" cx="12" cy="11" r="23" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#a50026"/>
+      <stop offset=".14" stop-color="#d73027"/>
+      <stop offset=".3" stop-color="#f46d43"/>
+      <stop offset=".46" stop-color="#fdae61"/>
+      <stop offset=".6" stop-color="#fee090"/>
+      <stop offset=".75" stop-color="#abd9e9"/>
+      <stop offset=".88" stop-color="#74add1"/>
+      <stop offset="1" stop-color="#4575b4"/>
+    </radialGradient>
+    <clipPath id="t"><rect width="36" height="36" rx="11"/></clipPath>
+  </defs>
+  <g clip-path="url(#t)">
+    <rect width="36" height="36" fill="url(#h)"/>
+    <g fill="none" stroke="#fff" stroke-opacity=".4" stroke-width="1.2">
+      <circle cx="12" cy="11" r="5.5"/>
+      <circle cx="12" cy="11" r="11"/>
+      <circle cx="12" cy="11" r="17"/>
+    </g>
+  </g>
+</svg>

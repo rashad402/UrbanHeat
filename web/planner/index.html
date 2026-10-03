@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="styles.css">
 <script>
   /* Resolve the theme BEFORE first paint. This has to be inline and synchronous: doing it in
@@ -30,13 +31,36 @@
 
 <header class="topbar">
   <div class="brand">
-    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 2.5c-.7 3.2-3.2 4.4-3.2 7.4a3.2 3.2 0 0 0 6.4 0c0-3-2.5-4.2-3.2-7.4Z" fill="currentColor" opacity=".9"/>
-      <path d="M5 14.5c1.9 1 3.1 2.6 3.4 4.6M19 14.5c-1.9 1-3.1 2.6-3.4 4.6M12 15.5v6" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+    <!-- The mark is the product in miniature: a heat map. The tile is painted with the same thermal
+         ramp as the legend, centred on a hot spot, with contour rings over it. It is a brand mark,
+         not an interface control, which is why it may use heat colours the chrome otherwise keeps
+         for data. favicon.svg is the same drawing. -->
+    <svg class="mark" viewBox="0 0 36 36" aria-hidden="true">
+      <defs>
+        <radialGradient id="markHeat" cx="12" cy="11" r="23" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#a50026"/>
+          <stop offset=".14" stop-color="#d73027"/>
+          <stop offset=".3" stop-color="#f46d43"/>
+          <stop offset=".46" stop-color="#fdae61"/>
+          <stop offset=".6" stop-color="#fee090"/>
+          <stop offset=".75" stop-color="#abd9e9"/>
+          <stop offset=".88" stop-color="#74add1"/>
+          <stop offset="1" stop-color="#4575b4"/>
+        </radialGradient>
+        <clipPath id="markTile"><rect width="36" height="36" rx="11"/></clipPath>
+      </defs>
+      <g clip-path="url(#markTile)">
+        <rect width="36" height="36" fill="url(#markHeat)"/>
+        <g fill="none" stroke="#fff" stroke-opacity=".4" stroke-width="1.2">
+          <circle cx="12" cy="11" r="5.5"/>
+          <circle cx="12" cy="11" r="11"/>
+          <circle cx="12" cy="11" r="17"/>
+        </g>
+      </g>
     </svg>
     <div class="brand-text">
-      <strong>UrbanHeat Planner</strong>
-      <span>Kochi Municipal Corporation</span>
+      <strong class="wordmark">UrbanHeat<em>Planner</em></strong>
+      <span class="brand-org">Kochi Municipal Corporation</span>
     </div>
   </div>
   <div class="topbar-meta">
@@ -130,19 +154,31 @@
       </div>
     </div>
 
+    <!-- The headline result lives on the map, not in the scrolling rail. The sliders that drive it
+         are in the rail right beside the map, so the number is in view while they are dragged, and
+         it never has to float over cards scrolling underneath it. Hidden until there is a result.
+         The scale reuses the legend's ramp and marks where the baseline and the new temperature
+         fall on it, so the cooling reads as a shift along the colour scale as well as a number. -->
+    <div class="readout is-idle" id="resultBar" role="status" aria-live="off">
+      <span class="ro-label">Predicted impact</span>
+      <div class="ro-row">
+        <span class="ro-main" id="rbMain"></span>
+        <span class="ro-sub" id="rbSub"></span>
+      </div>
+      <div class="ro-scale" aria-hidden="true">
+        <span class="ro-track" id="rbTrack"></span>
+        <span class="ro-span" id="rbSpan"></span>
+        <span class="ro-tick ro-from" id="rbFrom"></span>
+        <span class="ro-tick ro-to" id="rbTo"></span>
+      </div>
+      <div class="ro-ends" aria-hidden="true"><span id="rbLo"></span><span id="rbArea"></span><span id="rbHi"></span></div>
+    </div>
+
     <div class="hint" id="mapHint">Click wards to build a scenario · drag to pan · scroll to zoom</div>
   </section>
 
   <!-- ───────────────── control rail ───────────────── -->
   <aside class="rail" aria-label="Scenario controls and results">
-
-    <!-- Pinned to the top of the rail. The full results sit several panels down, so without this
-         a planner drags a slider and the number it changes is off-screen. -->
-    <div class="resultbar is-idle" id="resultBar" role="status" aria-live="off">
-      <span class="rb-label">Predicted impact</span>
-      <span class="rb-main" id="rbMain">Select an area to see it</span>
-      <span class="rb-sub" id="rbSub"></span>
-    </div>
 
     <section class="panel">
       <div class="panel-head">

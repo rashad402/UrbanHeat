@@ -207,12 +207,21 @@ button{font-family:inherit}
 .topbar .ghost-btn{height:34px;padding:0 15px}
 .brand{display:flex;align-items:center;gap:11px;min-width:0}
 .mark{
-  width:34px;height:34px;padding:7px;flex:none;
-  color:var(--accent);background:var(--accent-soft);border-radius:var(--pill);
+  width:36px;height:36px;flex:none;border-radius:11px;
+  /* a hairline so the tile keeps an edge against either ground, and a soft lift in dark */
+  box-shadow:0 1px 2px rgba(0,0,0,.25), 0 4px 10px -4px rgba(0,0,0,.45);
 }
-.brand-text{display:flex;flex-direction:column;line-height:1.2;min-width:0}
-.brand-text strong{font-family:var(--font-display);font-size:15px;font-weight:600;letter-spacing:-.01em}
-.brand-text span{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand-text{display:flex;flex-direction:column;justify-content:center;gap:3px;min-width:0}
+/* Two weights, one name: UrbanHeat carries the weight, Planner is the lighter qualifier. */
+.wordmark{
+  display:block;font-family:var(--font-display);font-size:17px;font-weight:700;
+  letter-spacing:-.025em;line-height:1;color:var(--fg);white-space:nowrap;
+}
+.wordmark em{font-style:normal;font-weight:400;color:var(--fg-dim);margin-left:.32em;letter-spacing:-.015em}
+.brand-org{
+  display:block;font-size:10px;font-weight:500;line-height:1;text-transform:uppercase;
+  letter-spacing:.11em;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
 /* Only the two controls live here now, so they share one even gap. The wider group boundary this
    used to carry separated them from the status chips, which are gone. */
 .topbar-meta{margin-left:auto;display:flex;align-items:center;gap:8px}
@@ -432,23 +441,60 @@ input[type=range]::-moz-range-thumb{
   background:transparent;
   overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:14px;
   scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent;
+  /* The scrollbar is drawn INSIDE the rail's box, so with no padding the cards ran right up to it
+     and the thumb read as the cards' own right border. padding-right is the visible gap, and
+     scrollbar-gutter keeps the cards the same width whether or not the rail is long enough to
+     scroll, so they do not jump 10px when a result panel opens. */
+  padding-right:10px;scrollbar-gutter:stable;
 }
 
-/* Pinned result strip. The full results panel sits several cards below the sliders, so without
-   this a planner drags a slider and the number it moves is off-screen. */
-.resultbar{
-  position:sticky;top:0;z-index:6;flex:none;
-  display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 12px;
-  padding:11px 16px 12px;background:var(--surface);
-  border:1px solid var(--line);border-radius:var(--radius-sm);box-shadow:var(--shadow-raise);
+/* Headline result, on the map. Glass on its own elevation like the other map controls, so it
+   reads as part of the instrument and not as a card that has wandered out of the rail. It is
+   hidden until there is something to say — an idle "select an area" placeholder was just noise. */
+.readout{
+  position:absolute;top:16px;right:16px;z-index:20;width:264px;
+  padding:12px 15px 11px;background:var(--glass);border:1px solid var(--line);
+  border-radius:var(--radius-sm);box-shadow:var(--shadow-float);backdrop-filter:blur(8px);
+  transition:opacity .25s ease, translate .3s var(--ease-out), visibility 0s linear 0s;
 }
-.rb-label{width:100%;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
+.readout.is-idle{
+  opacity:0;translate:0 -8px;visibility:hidden;pointer-events:none;
+  transition:opacity .2s ease, translate .25s ease, visibility 0s linear .25s;
+}
+.ro-label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
   color:var(--muted);font-weight:600}
-.rb-main{font-family:var(--font-mono);font-size:22px;font-weight:600;letter-spacing:-.02em;
-  color:var(--accent)}
-.rb-sub{margin-left:auto;font-family:var(--font-mono);font-size:12px;color:var(--fg-dim)}
-.resultbar.is-idle .rb-main{font-family:var(--font-ui);font-size:13px;font-weight:500;
-  letter-spacing:0;color:var(--muted)}
+.ro-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-top:3px}
+.ro-main{font-family:var(--font-mono);font-size:28px;font-weight:600;letter-spacing:-.03em;
+  line-height:1.1;color:var(--accent);white-space:nowrap;flex:none}
+/* an area is selected but nothing is applied yet: show the baseline, quietly */
+.readout.is-base .ro-main{color:var(--fg);font-size:22px}
+.ro-sub{font-family:var(--font-mono);font-size:11.5px;color:var(--fg-dim);text-align:right;
+  white-space:nowrap;min-width:0}
+/* The baseline hint is a sentence, not a figure. On one line it was wider than the card, so it
+   overflowed the edge and shoved the unit of the number onto a second line. It gets its own line
+   and is allowed to wrap; the number keeps nowrap so it can never split. */
+.readout.is-base .ro-row{flex-wrap:wrap;row-gap:2px}
+.readout.is-base .ro-sub{flex:1 1 100%;text-align:left;white-space:normal;line-height:1.4}
+
+/* the scale: the legend's own ramp, with the baseline and the new temperature marked on it */
+.ro-scale{position:relative;height:16px;margin-top:10px}
+.ro-track{position:absolute;left:0;right:0;top:5px;height:6px;border-radius:var(--pill);
+  box-shadow:var(--inset)}
+.ro-span{position:absolute;top:7px;height:2px;background:var(--fg);border-radius:2px;
+  transition:left .4s var(--ease-out), width .4s var(--ease-out)}
+.ro-tick{
+  position:absolute;top:2px;width:12px;height:12px;margin-left:-6px;border-radius:50%;
+  background:var(--surface);border:2px solid var(--fg);
+  box-shadow:0 0 0 2px var(--glass);
+  transition:left .4s var(--ease-out);
+}
+/* the baseline is the hollow mark; the result is the solid one */
+.ro-to{background:var(--fg)}
+.readout.is-base .ro-to,.readout.is-base .ro-span{display:none}
+.ro-ends{display:flex;justify-content:space-between;gap:8px;margin-top:3px;
+  font-family:var(--font-mono);font-size:10px;color:var(--muted)}
+.ro-ends #rbArea{flex:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 .panel{
   padding:18px;background:var(--surface);
   border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);
@@ -650,7 +696,7 @@ input[type=range]::-moz-range-thumb{
   .spinner{animation-duration:2.4s}
   .sld-sheen,.sld-halo,.status-dot{animation:none}
   .sld-sheen{opacity:0}
-  .sld-fill,.sld-halo,.cmp-fill,.rank-row,
+  .readout,.ro-span,.ro-tick,.sld-fill,.sld-halo,.cmp-fill,.rank-row,
   .ghost-btn,.primary-btn,.tool,.seg,.preset,.link-btn{transition-duration:.01ms}
   .ghost-btn:hover,.primary-btn:hover,.tool:hover,.preset:hover,.rank-row:hover{transform:none}
 }
@@ -796,17 +842,37 @@ input[type=range]::-moz-range-thumb{
 .map.is-drawing,.map.is-tracing{touch-action:none}
 
 /* ───────────── responsive ───────────── */
+/* Between the stacked breakpoint and ~1180px the map is too narrow for the toolbar and the
+   readout side by side (430px + 264px), so the readout drops to a second row under the toolbar. */
+@media (max-width:1180px) and (min-width:1041px){
+  .readout{top:72px}
+}
 @media (max-width:1040px){
   body{overflow:auto}
   .shell{grid-template-columns:1fr;height:auto}
   .stage{height:min(62vh,560px)}
-  .rail{max-height:none;overflow:visible}
+  .rail{max-height:none;overflow:visible;padding-right:0;scrollbar-gutter:auto}
   .layers{width:220px}
   .hint{display:none}
+  /* Stacked, the map is above the rail and scrolls out of view while the sliders are on screen, so
+     the readout docks to the bottom of the screen instead — compact, one row, scale dropped. */
+  .readout{
+    position:fixed;top:auto;right:auto;bottom:14px;left:50%;
+    transform:translateX(-50%);z-index:50;width:min(340px,calc(100vw - 24px));
+    padding:9px 15px;translate:0 8px;
+  }
+  .readout:not(.is-idle){translate:0 0}
+  .readout .ro-scale,.readout .ro-ends,.readout .ro-label{display:none}
+  .ro-row{margin-top:0;align-items:center}
+  .ro-main{font-size:22px}
+  /* the docked version is one row: number left, hint right, and the hint may wrap within its half */
+  .readout.is-base .ro-row{flex-wrap:nowrap}
+  .readout.is-base .ro-sub{flex:1 1 0;text-align:right}
+  .toast{bottom:78px}
 }
 @media (max-width:560px){
   .topbar{height:auto;padding:11px 13px;flex-wrap:wrap;gap:9px}
-  .brand-text span{display:none}
+  .brand-org{display:none}
   .shell{padding:10px;gap:10px}
   .panel{padding:15px 14px}
   .presets{grid-template-columns:1fr 1fr}
@@ -854,10 +920,10 @@ input[type=range]::-moz-range-thumb{
   .toolbar,.layers,.hint,.box-draw,.toast,.ghost-btn,.link-btn,
   .mapboxgl-ctrl,.presets,.sld,input[type=range],.status-dot,
   .coach,.search,.wardlist,.segmented,.scen-actions,.scen-pick,.scen-del,
-  .select,.legend-inert,.resultbar,.layers-toggle,.layers-more{display:none!important}
+  .select,.legend-inert,.readout,.layers-toggle,.layers-more{display:none!important}
   .scen-row{grid-template-columns:1fr auto;border:1px solid #ddd}
   .diff{break-inside:avoid}
-  .rail{border:0;max-height:none;overflow:visible;display:block;gap:0}
+  .rail{border:0;max-height:none;overflow:visible;display:block;gap:0;padding:0}
   .panel{break-inside:avoid;border:0;border-bottom:1px solid #ddd;border-radius:0;box-shadow:none}
   .rank{max-height:none;overflow:visible}
   .statusbar{color:#555;border-top:1px solid #ccc}

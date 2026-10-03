@@ -207,6 +207,9 @@
       ? meta.roof_share_default : 0.5;
 
     $("legendBar").style.background = `linear-gradient(90deg, ${meta.palette.join(",")})`;
+    $("rbTrack").style.background = `linear-gradient(90deg, ${meta.palette.join(",")})`;
+    $("rbLo").textContent = meta.lst_range[0] + "°";
+    $("rbHi").textContent = meta.lst_range[1] + "°";
     $("legLo").textContent = meta.lst_range[0] + "°C";
     $("legHi").textContent = meta.lst_range[1] + "°C";
 
@@ -988,26 +991,36 @@
     return null;
   }
 
-  /* Mirrors the headline numbers into the strip pinned to the top of the rail. */
+  /* The headline result, shown on the map. Hidden until there is a selection; with a selection but
+     no intervention it shows just the baseline; with one it shows ΔT and moves the two marks on
+     the temperature scale. */
   function syncResultBar(s, none) {
     const bar = $("resultBar");
     if (!bar) return;
-    if (!s) {
-      bar.classList.add("is-idle");
-      $("rbMain").textContent = "Select an area to see it";
-      $("rbSub").textContent = "";
-      return;
-    }
-    if (none) {
-      bar.classList.add("is-idle");
-      $("rbMain").textContent = "Choose an intervention";
-      $("rbSub").textContent = `${s.mean_t_base.toFixed(1)} °C baseline`;
-      return;
-    }
+    if (!s) { bar.classList.add("is-idle"); return; }
+
+    const [lo, hi] = state.meta ? state.meta.lst_range : [31, 41];
+    const pos = (t) => (Math.max(0, Math.min(1, (t - lo) / (hi - lo))) * 100).toFixed(1) + "%";
+    const base = s.mean_t_base;
+
     bar.classList.remove("is-idle");
+    bar.classList.toggle("is-base", !!none);
+    $("rbFrom").style.left = pos(base);
+
+    if (none) {
+      $("rbMain").textContent = base.toFixed(1) + " °C";
+      $("rbSub").textContent = "baseline · pick an intervention";
+      $("rbArea").textContent = "";
+      return;
+    }
+    const now = base + s.mean_delta_t;
     $("rbMain").textContent = fmtDT(s.mean_delta_t) + " °C";
-    $("rbSub").textContent = `${s.mean_t_base.toFixed(1)} → ${(s.mean_t_base + s.mean_delta_t).toFixed(1)} °C`
-      + ` · ${(s.treated_area_sqkm ?? 0).toFixed(2)} km² treated`;
+    $("rbSub").textContent = `${base.toFixed(1)} → ${now.toFixed(1)}`;
+    $("rbArea").textContent = `${(s.treated_area_sqkm ?? 0).toFixed(2)} km² treated`;
+    $("rbTo").style.left = pos(now);
+    const lowEnd = Math.min(base, now), highEnd = Math.max(base, now);
+    $("rbSpan").style.left = pos(lowEnd);
+    $("rbSpan").style.width = `calc(${pos(highEnd)} - ${pos(lowEnd)})`;
   }
 
   function resetResults() {
