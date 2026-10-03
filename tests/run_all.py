@@ -17,6 +17,7 @@ ROOT = os.path.dirname(HERE)
 SUITES = [
     ("SEB physics", "test_sebal.py"),
     ("Physics augmentation", "test_synthetic.py"),
+    ("Overlay tiling", "test_tiling.py"),
     ("Planner API", "test_api.py"),
 ]
 

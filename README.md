@@ -30,9 +30,9 @@ data_engine/   satellite + climate extraction, cloud masking, gap-filling, datas
 models/        features, baselines (RF/XGB/MLP), CNN, SEBAL physics, PINN, physics-generated
                training samples, training, evaluation
 api/           FastAPI services — planner.py (the console), main.py, live_demo.py, inference.py
-web/planner/   the planning console (Mapbox GL JS + Earth Engine raster tiles)
+web/planner/   the planning console (Mapbox GL JS); tiles/ holds the baked thermal overlay
 configs/       data & model configuration, AOI + ward boundaries, measured roof shares
-tests/         SEB physics, physics augmentation, and API-level tests (no GEE required)
+tests/         SEB physics, physics augmentation, overlay tiling, and API-level tests (no GEE required)
 notebooks/     exploratory only (never a source of reported results)
 docs/          final report (LaTeX) and figures
 ```
@@ -47,12 +47,13 @@ surface temperature from the trained PINN.
 uvicorn api.planner:app --port 8080
 ```
 
-Then open **http://localhost:8080** (first start takes ~30 s while Earth Engine renders the scene).
+Then open **http://localhost:8080** (first start takes ~15 s: model, dataset and Earth Engine sign-in).
 
 - Baseline LST is **measured** Landsat; the PINN supplies the **response** (ΔT) only.
-- Map is **Mapbox GL JS** (satellite basemap) with the Landsat thermal layer as Earth Engine
-  raster tiles, so both pan and zoom at any scale. Those tile URLs are signed and expire, which
-  fails *silently*, so they are re-minted on a timer and via `/api/refresh_tiles`. A static
+- Map is **Mapbox GL JS** (satellite basemap) with the Landsat thermal layer as **baked static
+  tiles** (`web/planner/tiles/`, see below), so it pans and zooms at any scale and appears
+  instantly. If no bake exists the app falls back to live Earth Engine tiles, whose signed URLs
+  expire *silently*, so those are re-minted on a timer and via `/api/refresh_tiles`. A static
   server-rendered scene remains as the no-WebGL fallback (`/api/scene`).
 - Every selection is analysed **per pixel**, then averaged. The model is non-linear, so averaging
   features first and predicting once is a different (and wrong) number — see `tests/test_api.py`,
@@ -69,13 +70,33 @@ draw a box or an arbitrary **zone**, shade wards by baseline temperature or pred
 wards by severity / cooling / cooling-per-km²-treated, save and name scenarios (persisted in the
 browser), compare two side by side, and export CSV or print a one-page sheet.
 
+### Baking the thermal overlay
+
+The overlay is a per-pixel **median** of land surface temperature over every usable dry-season
+Landsat 8/9 scene (94 of them). Served live, Earth Engine recomputes that median tile by tile on
+every first view (measured: 12.6 s per tile on average, up to 24 s), so the layer filled in slowly and
+needed an Earth Engine login just to draw. The scenes are history, so it is computed **once**:
+
+```bash
+python scripts/bake_overlay.py            # ~1 min; writes web/planner/tiles/ (~5 MB, committed)
+python scripts/bake_overlay.py --reuse    # re-tile the last export without Earth Engine
+```
+
+Re-run it when new scenes should enter the median (monthly is plenty) or when the colour range,
+palette, extent or zoom range change, since colours are baked into the tiles. The tile maths is in
+`data_engine/tiling.py` and the single definition of the layer, shared with the live fallback, is
+`data_engine/overlay.py`. `URBANHEAT_OVERLAY=earthengine` forces the live layer.
+
+Box and Zone still query Earth Engine live: a stored layer cannot supply NDVI, albedo and
+climate for an arbitrary shape.
+
 ## Quick start (Python side)
 
 ```bash
 conda env create -f environment.yml
 conda activate urbanheat
 earthengine authenticate          # requires a (free) Google Earth Engine account
-python data_engine/build_dataset.py --config configs/data_config.yaml
+python -m data_engine.build_dataset --config configs/data_config.yaml   # a module: it uses relative imports
 ```
 
 ## Experiments

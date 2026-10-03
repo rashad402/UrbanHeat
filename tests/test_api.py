@@ -89,6 +89,9 @@ def build_client(tmp, roof_share_file=None):
     P.ROOF_SHARE_PATH = roof_share_file or os.path.join(tmp, "absent.json")
     P.CFG_PATH = os.path.join(ROOT, "configs", "data_config.yaml")
     P.SCENE_CACHE = os.path.join(tmp, "scene_cache.json")
+    # The repo ships baked overlay tiles. These tests are about the LIVE layer, so point them at
+    # a manifest that does not exist; the baked mode has its own section below.
+    P.BAKED_MANIFEST = os.path.join(tmp, "no-baked-tiles", "manifest.json")
     return TestClient(P.app), P
 
 
@@ -101,6 +104,89 @@ def post(client, path, albedo=None, ndvi=None, wards=None, bbox=None,
         "interventions": {"albedo_set": albedo, "ndvi_delta": ndvi, "roof_share": roof_share},
         "season": season,
     })
+
+
+def _write_bake(tmp, name, with_tiles=True, **over):
+    """A throwaway baked overlay: a manifest, and (optionally) the tile folder it points at."""
+    d = os.path.join(tmp, name)
+    os.makedirs(os.path.join(d, "8") if with_tiles else d, exist_ok=True)
+    manifest = {"version": "test-1", "lst_range": [30, 42], "palette": ["#000000", "#ffffff"],
+                "bounds": [76.2, 9.9, 76.4, 10.1], "minzoom": 8, "maxzoom": 15, "tile_size": 256,
+                "n_tiles": 3, "baked_at": "2026-10-03T00:00:00+00:00",
+                "source": {"n_scenes": 77, "start": "2015-01-01", "end": "2026-06-30",
+                           "months": [12, 1, 2, 3, 4]}}
+    manifest.update(over)
+    path = os.path.join(d, "manifest.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh)
+    return path
+
+
+def _test_baked_overlay(tmp, P):
+    """The thermal layer served as static tiles, and every way that can fall back to Earth Engine."""
+    from fastapi.testclient import TestClient
+
+    print("\nBaked overlay")
+
+    P.BAKED_MANIFEST = _write_bake(tmp, "bake-ok")
+    fake_ee.reset()
+    with TestClient(P.app) as c:
+        m = c.get("/api/meta").json()
+        layer = m["lst_layer"]
+        check("baked tiles are used when a usable bake exists", layer["kind"] == "baked",
+              layer["kind"])
+        check("the tile URL is a local static path with the bake version, not an Earth Engine URL",
+              layer["tiles"] == "/tiles/{z}/{x}/{y}.png?v=test-1" and m["lst_tiles"] == layer["tiles"],
+              layer["tiles"])
+        check("the browser is told the zoom range and extent, so it never asks for a tile that was "
+              "not written",
+              (layer["minzoom"], layer["maxzoom"]) == (8, 15) and layer["bounds"] == [76.2, 9.9, 76.4, 10.1])
+        check("the legend range and palette come from the bake, so they cannot disagree with the map",
+              m["lst_range"] == [30, 42] and m["palette"] == ["#000000", "#ffffff"],
+              f"{m['lst_range']} {m['palette']}")
+        check("baked tiles do not expire: no TTL is advertised", m["tile_ttl_s"] is None)
+        check("NO Earth Engine tile was minted at startup or by the meta call",
+              fake_ee.mapid_calls["n"] == 0, f"{fake_ee.mapid_calls['n']} getMapId calls")
+        check("the scene count in the data vintage comes from the manifest, not an Earth Engine call",
+              m["vintage"]["n_scenes"] == 77, f"{m['vintage']['n_scenes']} (Earth Engine would say "
+              f"{fake_ee.N_SCENES})")
+        r = c.post("/api/refresh_tiles").json()
+        check("refresh_tiles has nothing to re-sign: it returns the same static URL",
+              r["lst_tiles"] == layer["tiles"] and r.get("kind") == "baked"
+              and fake_ee.mapid_calls["n"] == 0)
+
+    # an unusable bake must not break the app: it falls back to the live layer, with a message
+    fake_ee.reset()
+    P.BAKED_MANIFEST = _write_bake(tmp, "bake-no-tiles", with_tiles=False)
+    with TestClient(P.app) as c:
+        m = c.get("/api/meta").json()
+        check("a manifest whose tiles are missing falls back to live Earth Engine tiles",
+              m["lst_layer"]["kind"] == "earthengine" and fake_ee.mapid_calls["n"] >= 1
+              and m["tile_ttl_s"] is not None, m["lst_layer"]["kind"])
+
+    fake_ee.reset()
+    P.BAKED_MANIFEST = _write_bake(tmp, "bake-incomplete")
+    with open(P.BAKED_MANIFEST, "w", encoding="utf-8") as fh:
+        json.dump({"version": "x"}, fh)
+    with TestClient(P.app) as c:
+        check("a manifest missing required fields falls back instead of crashing startup",
+              c.get("/api/meta").json()["lst_layer"]["kind"] == "earthengine")
+
+    fake_ee.reset()
+    P.BAKED_MANIFEST = os.path.join(tmp, "no-such-bake", "manifest.json")
+    with TestClient(P.app) as c:
+        check("no bake at all uses the live layer (the original behaviour)",
+              c.get("/api/meta").json()["lst_layer"]["kind"] == "earthengine")
+
+    fake_ee.reset()
+    P.BAKED_MANIFEST = _write_bake(tmp, "bake-forced-off")
+    os.environ["URBANHEAT_OVERLAY"] = "earthengine"
+    try:
+        with TestClient(P.app) as c:
+            check("URBANHEAT_OVERLAY=earthengine forces the live layer even when a bake exists",
+                  c.get("/api/meta").json()["lst_layer"]["kind"] == "earthengine")
+    finally:
+        del os.environ["URBANHEAT_OVERLAY"]
 
 
 def main():
@@ -295,6 +381,9 @@ def main():
             "selection": {"kind": "nonsense"},
             "interventions": {"albedo_set": 0.5}})
         check("unknown selection kind returns 400", badkind.status_code == 400)
+
+    # ───────────── baked overlay ─────────────
+    _test_baked_overlay(tmp, P)
 
     # ───────────── measured roof share ─────────────
     _test_measured_roof_share(tmp, ids)

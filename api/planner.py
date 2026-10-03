@@ -37,6 +37,7 @@ from pydantic import BaseModel
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from api.inference import PinnModel, whatif, built_fraction   # noqa: E402
 from data_engine.build_dataset import load_config, aoi_geometry, build_collection  # noqa: E402
+from data_engine.overlay import PALETTE, build_composite, stretch_range  # noqa: E402
 from models.features import INPUT_COLUMNS                      # noqa: E402
 
 CFG_PATH = "configs/data_config.yaml"
@@ -62,8 +63,10 @@ def _load_env(path=".env"):
 _load_env()
 MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN", "")
 
-PALETTE = ["313695", "4575b4", "74add1", "abd9e9", "fee090",
-           "fdae61", "f46d43", "d73027", "a50026"]
+# PALETTE (the colour ramp) is imported from data_engine/overlay.py, the one definition shared with
+# the bake script. When baked tiles exist, startup takes the range and palette from their manifest,
+# because those are what is actually painted into the files.
+#
 # Colour range of the thermal layer and its legend. This is only the FALLBACK: at startup the range
 # is derived from the data (see _stretch_lst_range). A fixed 28-46 degC span is far wider than the
 # city's real spread, so nearly every land pixel landed in the same orange band and wards were
@@ -99,11 +102,13 @@ ROOF_SHARE_PATH = "configs/roof_share_kochi.json"
 # via /api/refresh_tiles.
 TILE_TTL_S = 45 * 60
 
+# Where the baked overlay lives. Inside WEB_DIR, so the static mount serves it with no extra route.
+# Tests point this at a temporary file to exercise each mode.
+BAKED_MANIFEST = os.path.join(WEB_DIR, "tiles", "manifest.json")
+
 # Pixels sampled for a drawn selection. The area is measured from the geometry, never from
 # this count — see _region_area_sqkm.
 DRAW_SAMPLE_PIXELS = 600
-SCENE_MARGIN = 0.12      # fractional padding around the corporation, for geographic context
-MIN_ASPECT = 1.0         # widen east-west so the map fills a landscape viewport
 TILE_DIM = 1100          # Earth Engine refuses a single thumbnail much above this (HTTP 400)
 SAT_GRID = 2             # 2x2 tiles -> ~2200 px of satellite detail (~10 m/px, S2 native)
 LST_DIM = 1100           # Landsat is 30 m, so one tile already over-samples it
@@ -155,28 +160,18 @@ def _render_tiled(image, vis, bounds, grid=2, dim=TILE_DIM, quality=86):
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(), out.size
 
 
-def _scene_bounds(aoi):
-    """Pad the corporation bbox for context and widen it toward a landscape aspect."""
-    b = aoi.bounds().coordinates().getInfo()[0]
-    w, s, e, n = b[0][0], b[0][1], b[2][0], b[2][1]
-    dw, dh = e - w, n - s
-    w -= dw * SCENE_MARGIN; e += dw * SCENE_MARGIN
-    s -= dh * SCENE_MARGIN; n += dh * SCENE_MARGIN
-    dw, dh = e - w, n - s
-    if dw / dh < MIN_ASPECT:                      # too portrait -> grow sideways
-        need = MIN_ASPECT * dh - dw
-        w -= need / 2; e += need / 2
-    return [w, s, e, n]
-
-
 @app.middleware("http")
 async def _revalidate_assets(request, call_next):
     """Force the browser to revalidate app code. ETags make this cheap (304s), and it prevents
     a stale cached app.js from silently shadowing a deployed fix."""
     resp = await call_next(request)
     path = request.url.path
-    if path == "/" or path.endswith((".html", ".js", ".css")):
+    if path == "/" or path.endswith((".html", ".js", ".css", "manifest.json")):
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    elif path.startswith("/tiles/") and path.endswith(".png"):
+        # Safe to cache hard: every tile URL carries ?v=<bake version>, so a re-bake changes the
+        # URL itself instead of waiting for a cached copy to expire.
+        resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
     return resp
 
 
@@ -200,36 +195,47 @@ def _mint_tiles():
 
 
 def _tiles_url():
-    """Current tile URL, re-minted if it is close to expiry."""
+    """Current tile URL. Baked tiles never expire; live ones are re-minted close to expiry."""
+    if S.get("baked"):
+        return S["lst_tiles"]
     if "lst_tiles" not in S or time.time() - S.get("lst_tiles_at", 0) > TILE_TTL_S:
         return _mint_tiles()
     return S["lst_tiles"]
 
 
 def _stretch_lst_range(lst_c, aoi):
-    """Derive the colour range from the composite's own 5th-95th percentile over the city.
+    """The colour range, derived from the data. See data_engine.overlay.stretch_range."""
+    return stretch_range(lst_c, aoi, fallback=(LST_MIN, LST_MAX))
 
-    Measured for Kochi: the middle half of all land pixels spans only ~2 degC (36.6-38.6), so any
-    wide range paints most of the city one colour. 5th-95th (~31-41) lets the tails saturate and
-    the genuine hot spots stand out; 2nd-98th (29-43) was too gentle to separate wards.
 
-    Rounded outward to whole degrees so the legend reads cleanly. Any failure falls back to the
-    module defaults rather than blocking startup — the range is presentation, not analysis.
+def _load_baked():
+    """The bake manifest if there is a usable baked overlay, else None (serve Earth Engine tiles).
+
+    Baked tiles are static files made once by scripts/bake_overlay.py. They need no Earth Engine
+    at load, never expire, and appear instantly, so they win whenever they exist. Anything wrong
+    with them falls back to the live layer with a message, because a missing overlay is a worse
+    failure than a slow one.
+    Set URBANHEAT_OVERLAY=earthengine to force the live layer (to compare, or after changing
+    data_engine/overlay.py without re-baking).
     """
+    if os.environ.get("URBANHEAT_OVERLAY", "").lower() in ("ee", "earthengine", "live"):
+        print("Thermal overlay: live Earth Engine tiles (URBANHEAT_OVERLAY)")
+        return None
     try:
-        r = lst_c.reduceRegion(reducer=ee.Reducer.percentile([5, 95]), geometry=aoi,
-                               scale=60, maxPixels=1e9, bestEffort=True).getInfo()
-        lo, hi = r.get("lst_c_p5"), r.get("lst_c_p95")
-        if lo is None or hi is None:
-            raise ValueError("no percentiles returned")
-        lo, hi = math.floor(lo), math.ceil(hi)
-        if hi - lo < 6:                      # a very flat scene would make the ramp meaningless
-            mid = (lo + hi) / 2
-            lo, hi = math.floor(mid - 3), math.ceil(mid + 3)
-        return int(lo), int(hi)
+        with open(BAKED_MANIFEST, encoding="utf-8") as fh:
+            m = json.load(fh)
+        missing = [k for k in ("version", "lst_range", "palette", "bounds", "minzoom", "maxzoom")
+                   if k not in m]
+        if missing:
+            raise ValueError(f"manifest lacks {missing}")
+        if not os.path.isdir(os.path.join(os.path.dirname(BAKED_MANIFEST), str(m["minzoom"]))):
+            raise ValueError(f"no tiles for zoom {m['minzoom']}")
+        return m
+    except FileNotFoundError:
+        return None
     except Exception as exc:
-        print(f"Could not derive the colour range ({exc}); using {LST_MIN}-{LST_MAX}")
-        return LST_MIN, LST_MAX
+        print(f"Baked overlay unusable ({exc}); using live Earth Engine tiles")
+        return None
 
 
 def _load_roof_shares():
@@ -254,53 +260,61 @@ def _load_roof_shares():
 
 @app.on_event("startup")
 def _startup():
+    global LST_MIN, LST_MAX, PALETTE
     cfg = load_config(CFG_PATH)
     ee.Initialize(project=cfg["gee"]["project_id"])
-    aoi = aoi_geometry(cfg)
     dry = cfg["time"]["dry_season_months"]
 
-    col = build_collection(cfg, aoi, cfg["time"]["start"], cfg["time"]["end"])
-    col = col.map(lambda im: im.set("month", ee.Image(im).date().get("month"))) \
-             .filter(ee.Filter.inList("month", dry))
-    S["bounds"] = _scene_bounds(aoi)
-    west, south, east, north = S["bounds"]
-    region = ee.Geometry.Rectangle([west, south, east, north])
-
-    # Clip to the padded scene, not the corporation, so the thermal layer covers the whole map
-    # and a drawn area anywhere on screen returns data.
-    feat = col.median().clip(region)
-    lst_c = feat.select("lst").subtract(273.15).rename("lst_c")
-    S["feat"] = feat.addBands(lst_c)
-    S["aoi"] = aoi
-
+    baked = _load_baked()
+    # With baked tiles the extent is already known from the manifest, which saves an Earth Engine
+    # round trip. Clipped to the padded scene, not the corporation, so the thermal layer covers the
+    # whole map and a drawn area anywhere on screen returns data.
+    comp = build_composite(cfg, bounds=baked["bounds"] if baked else None)
+    aoi, col, region, lst_c = comp["aoi"], comp["col"], comp["region"], comp["lst_c"]
+    S["bounds"], S["feat"], S["aoi"] = comp["bounds"], comp["feat"], aoi
     S["s2"] = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
                .filterBounds(region).filterDate("2024-01-01", cfg["time"]["end"])
                .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 15)).median())
     S["lst_c"], S["region"] = lst_c, region
 
-    # Colour range from the data, BEFORE the tile URL is signed: the range is baked into it.
-    global LST_MIN, LST_MAX
-    LST_MIN, LST_MAX = _stretch_lst_range(lst_c, aoi)
-    print(f"Thermal colour range {LST_MIN}-{LST_MAX} degC")
-
-    # Thermal layer as Earth Engine TILES: zoomable with the Mapbox basemap, and it makes
-    # startup fast (the stitched static scene is only rendered on demand, as a fallback).
-    _mint_tiles()
-    print("Earth Engine LST tile layer ready")
+    if baked:
+        # The range and palette are whatever was painted into the files, so the legend cannot
+        # disagree with the map.
+        LST_MIN, LST_MAX = baked["lst_range"]
+        PALETTE = [h.lstrip("#") for h in baked["palette"]]
+        S["baked"] = baked
+        S["lst_tiles"] = f"/tiles/{{z}}/{{x}}/{{y}}.png?v={baked['version']}"
+        print(f"Thermal overlay: BAKED tiles {baked['version']} "
+              f"(z{baked['minzoom']}-{baked['maxzoom']}, {baked.get('n_tiles', '?')} tiles, range "
+              f"{LST_MIN}-{LST_MAX} degC). No Earth Engine needed to draw the map layer.")
+    else:
+        # Colour range from the data, BEFORE the tile URL is signed: the range is baked into it.
+        S.pop("baked", None)
+        LST_MIN, LST_MAX = _stretch_lst_range(lst_c, aoi)
+        print(f"Thermal colour range {LST_MIN}-{LST_MAX} degC")
+        # Thermal layer as Earth Engine TILES: zoomable with the Mapbox basemap. Run
+        # scripts/bake_overlay.py to replace this with static tiles that load instantly.
+        _mint_tiles()
+        print("Earth Engine LST tile layer ready (live; run scripts/bake_overlay.py to bake it)")
 
     # Data vintage — how many scenes went into the baseline and over what window. A public-sector
     # tool that shows a number without saying how old it is invites misplaced confidence.
-    try:
-        S["vintage"] = {
-            "n_scenes": int(col.size().getInfo()),
-            "start": cfg["time"]["start"], "end": cfg["time"]["end"],
-            "months": dry,
-            "sensor": "Landsat 8/9 C2 L2 (ST_B10), 30 m",
-        }
-    except Exception as exc:
-        print(f"Could not read scene count ({exc})")
-        S["vintage"] = {"n_scenes": None, "start": cfg["time"]["start"],
-                        "end": cfg["time"]["end"], "months": dry}
+    src = (baked or {}).get("source") or {}
+    if src.get("n_scenes"):
+        S["vintage"] = {"n_scenes": int(src["n_scenes"]), "start": src["start"], "end": src["end"],
+                        "months": src["months"], "sensor": "Landsat 8/9 C2 L2 (ST_B10), 30 m"}
+    else:
+        try:
+            S["vintage"] = {
+                "n_scenes": int(col.size().getInfo()),
+                "start": cfg["time"]["start"], "end": cfg["time"]["end"],
+                "months": dry,
+                "sensor": "Landsat 8/9 C2 L2 (ST_B10), 30 m",
+            }
+        except Exception as exc:
+            print(f"Could not read scene count ({exc})")
+            S["vintage"] = {"n_scenes": None, "start": cfg["time"]["start"],
+                            "end": cfg["time"]["end"], "months": dry}
 
     S["model"] = PinnModel()
 
@@ -466,6 +480,14 @@ def meta():
     in the Mapbox account settings."""
     rmse = S["metrics"].get("rmse")
     r2 = S["metrics"].get("r2")
+    b = S.get("baked")
+    # `kind` tells the browser whether the tiles can expire. A baked layer is a fixed set of static
+    # files with a known zoom range and extent, so Mapbox is told the bounds and never requests a
+    # tile that was not written.
+    layer = ({"kind": "baked", "tiles": S["lst_tiles"], "minzoom": b["minzoom"],
+              "maxzoom": b["maxzoom"], "bounds": b["bounds"], "tile_size": b.get("tile_size", 256),
+              "version": b["version"], "baked_at": b.get("baked_at")}
+             if b else {"kind": "earthengine", "tiles": _tiles_url()})
     n_inert = sum(1 for f in S["wards_geo"]["features"]
                   if not f["properties"]["has_data"])
     return {"model": S["model"].name, "n_wards": int(len(S["wards"])),
@@ -475,8 +497,9 @@ def meta():
             "city": "Kochi, Kerala", "lst_range": [LST_MIN, LST_MAX],
             "palette": ["#" + c for c in PALETTE],
             "bounds": S["bounds"],
-            "lst_tiles": _tiles_url(),
-            "tile_ttl_s": TILE_TTL_S,
+            "lst_tiles": layer["tiles"],
+            "lst_layer": layer,
+            "tile_ttl_s": None if S.get("baked") else TILE_TTL_S,
             "vintage": S.get("vintage", {}),
             "model_rmse": None if rmse is None or rmse != rmse else round(rmse, 2),
             "model_r2": None if r2 is None or r2 != r2 else round(r2, 3),
@@ -493,6 +516,8 @@ def refresh_tiles():
     The client calls this when tiles start failing. Without it an expired URL just stops
     rendering the thermal layer, with nothing in the UI to say why.
     """
+    if S.get("baked"):                               # static files: nothing to re-sign
+        return {"lst_tiles": S["lst_tiles"], "ttl_s": None, "kind": "baked"}
     return {"lst_tiles": _mint_tiles(), "ttl_s": TILE_TTL_S}
 
 

@@ -371,11 +371,14 @@
 
     // Re-sign the tile URL before it can expire, so a long planning session never loses the
     // thermal layer mid-use.
-    const ttl = (meta.tile_ttl_s || 2700) * 1000;
-    setInterval(refreshTiles, Math.max(ttl * 0.8, 300000));
+    if (!lstIsBaked(meta)) {
+      const ttl = (meta.tile_ttl_s || 2700) * 1000;
+      setInterval(refreshTiles, Math.max(ttl * 0.8, 300000));
+    }
   }
 
   async function refreshTiles() {
+    if (lstIsBaked(state.meta)) return;           // static files: nothing expires, nothing to re-sign
     if (state.refreshing || !state.map) return;
     state.refreshing = true;
     try {
@@ -412,8 +415,27 @@
     }, thermalBeforeId(map));
   }
 
+  /* The thermal layer's Mapbox source. Two kinds, chosen by the server (see /api/meta):
+       baked: static tiles on this server, made once by scripts/bake_overlay.py. They never expire,
+              need no Earth Engine to draw, and arrive in milliseconds. The source is told its zoom
+              range and its extent, so Mapbox enlarges the last level past maxzoom instead of asking
+              for tiles that do not exist, and never requests one outside the baked area.
+       earthengine: live signed tiles, computed by Earth Engine on first view. Slow to fill in, and
+              the URL expires (see refreshTiles).
+     The tile template is joined to the page origin as a STRING. Going through new URL() would
+     percent-encode the {z}/{x}/{y} placeholders and Mapbox would never substitute them. */
+  const lstIsBaked = (meta) => !!(meta && meta.lst_layer && meta.lst_layer.kind === "baked");
+  function lstSourceSpec(meta) {
+    if (!lstIsBaked(meta)) return { type: "raster", tiles: [meta.lst_tiles], tileSize: 256 };
+    const L = meta.lst_layer;
+    return {
+      type: "raster", tiles: [location.origin + L.tiles], tileSize: L.tile_size || 256,
+      minzoom: L.minzoom, maxzoom: L.maxzoom, bounds: L.bounds,
+    };
+  }
+
   function addLayers(map, meta, wards) {
-    map.addSource("lst", { type: "raster", tiles: [meta.lst_tiles], tileSize: 256 });
+    map.addSource("lst", lstSourceSpec(meta));
     addThermalLayer(map);
 
     // Everything below sits under the first label layer, so place names stay readable on top.
