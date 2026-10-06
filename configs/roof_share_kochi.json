@@ -1,0 +1,378 @@
+{
+  "source": "GOOGLE/Research/open-buildings/v3/polygons",
+  "confidence": 0.7,
+  "definition": "building footprint area / built-up area (NDVI-derived)",
+  "city_default": 0.5819,
+  "wards": {
+    "2": {
+      "roof_share": 0.6252,
+      "built_sqkm": 0.2445,
+      "roof_sqkm": 0.1529
+    },
+    "3": {
+      "roof_share": 0.6851,
+      "built_sqkm": 0.1244,
+      "roof_sqkm": 0.0852
+    },
+    "4": {
+      "roof_share": 0.7233,
+      "built_sqkm": 0.2286,
+      "roof_sqkm": 0.1654
+    },
+    "5": {
+      "roof_share": 0.6968,
+      "built_sqkm": 0.4082,
+      "roof_sqkm": 0.2844
+    },
+    "6": {
+      "roof_share": 0.6727,
+      "built_sqkm": 0.228,
+      "roof_sqkm": 0.1534
+    },
+    "x6": {
+      "roof_share": 0.6923,
+      "built_sqkm": 0.3687,
+      "roof_sqkm": 0.2553
+    },
+    "8": {
+      "roof_share": 0.6791,
+      "built_sqkm": 0.4096,
+      "roof_sqkm": 0.2782
+    },
+    "9": {
+      "roof_share": 0.6779,
+      "built_sqkm": 0.2154,
+      "roof_sqkm": 0.146
+    },
+    "10": {
+      "roof_share": 0.6603,
+      "built_sqkm": 0.3615,
+      "roof_sqkm": 0.2387
+    },
+    "12": {
+      "roof_share": 0.5907,
+      "built_sqkm": 0.3842,
+      "roof_sqkm": 0.2269
+    },
+    "13": {
+      "roof_share": 0.6675,
+      "built_sqkm": 0.3016,
+      "roof_sqkm": 0.2013
+    },
+    "11": {
+      "roof_share": 0.6222,
+      "built_sqkm": 0.5701,
+      "roof_sqkm": 0.3547
+    },
+    "28": {
+      "roof_share": 0.7194,
+      "built_sqkm": 0.2593,
+      "roof_sqkm": 0.1866
+    },
+    "14": {
+      "roof_share": 0.6816,
+      "built_sqkm": 0.4365,
+      "roof_sqkm": 0.2975
+    },
+    "21": {
+      "roof_share": 0.6725,
+      "built_sqkm": 0.3933,
+      "roof_sqkm": 0.2645
+    },
+    "17": {
+      "roof_share": 0.6381,
+      "built_sqkm": 0.3312,
+      "roof_sqkm": 0.2113
+    },
+    "20": {
+      "roof_share": 0.6662,
+      "built_sqkm": 0.2933,
+      "roof_sqkm": 0.1954
+    },
+    "x19": {
+      "roof_share": 0.4521,
+      "built_sqkm": 0.6176,
+      "roof_sqkm": 0.2792
+    },
+    "18": {
+      "roof_share": 0.6167,
+      "built_sqkm": 0.3883,
+      "roof_sqkm": 0.2394
+    },
+    "15": {
+      "roof_share": 0.5123,
+      "built_sqkm": 0.3529,
+      "roof_sqkm": 0.1808
+    },
+    "19": {
+      "roof_share": 0.6505,
+      "built_sqkm": 0.3595,
+      "roof_sqkm": 0.2338
+    },
+    "27": {
+      "roof_share": 0.66,
+      "built_sqkm": 0.2334,
+      "roof_sqkm": 0.1541
+    },
+    "26": {
+      "roof_share": 0.7199,
+      "built_sqkm": 0.1721,
+      "roof_sqkm": 0.1239
+    },
+    "25": {
+      "roof_share": 0.6836,
+      "built_sqkm": 0.2494,
+      "roof_sqkm": 0.1705
+    },
+    "24": {
+      "roof_share": 0.6393,
+      "built_sqkm": 0.2904,
+      "roof_sqkm": 0.1856
+    },
+    "23": {
+      "roof_share": 0.6141,
+      "built_sqkm": 0.2358,
+      "roof_sqkm": 0.1448
+    },
+    "31": {
+      "roof_share": 0.5439,
+      "built_sqkm": 0.4515,
+      "roof_sqkm": 0.2455
+    },
+    "71": {
+      "roof_share": 0.0367,
+      "built_sqkm": 0.1435,
+      "roof_sqkm": 0.0053
+    },
+    "x30": {
+      "roof_share": 0.6029,
+      "built_sqkm": 0.3922,
+      "roof_sqkm": 0.2365
+    },
+    "22": {
+      "roof_share": 0.5435,
+      "built_sqkm": 0.5397,
+      "roof_sqkm": 0.2934
+    },
+    "29": {
+      "roof_share": 0.2444,
+      "built_sqkm": 0.6548,
+      "roof_sqkm": 0.16
+    },
+    "59": {
+      "roof_share": 0.4588,
+      "built_sqkm": 0.9792,
+      "roof_sqkm": 0.4493
+    },
+    "30": {
+      "roof_share": 0.3626,
+      "built_sqkm": 2.6122,
+      "roof_sqkm": 0.9472
+    },
+    "x35": {
+      "roof_share": 0.0079,
+      "built_sqkm": 0.2076,
+      "roof_sqkm": 0.0016
+    },
+    "66": {
+      "roof_share": 0.4599,
+      "built_sqkm": 0.7033,
+      "roof_sqkm": 0.3234
+    },
+    "42": {
+      "roof_share": 0.7064,
+      "built_sqkm": 0.5939,
+      "roof_sqkm": 0.4195
+    },
+    "65": {
+      "roof_share": 0.5406,
+      "built_sqkm": 0.5653,
+      "roof_sqkm": 0.3056
+    },
+    "64": {
+      "roof_share": 0.5629,
+      "built_sqkm": 1.2025,
+      "roof_sqkm": 0.6769
+    },
+    "60": {
+      "roof_share": 0.5392,
+      "built_sqkm": 0.9756,
+      "roof_sqkm": 0.526
+    },
+    "57": {
+      "roof_share": 0.5737,
+      "built_sqkm": 0.4613,
+      "roof_sqkm": 0.2646
+    },
+    "32": {
+      "roof_share": 0.5741,
+      "built_sqkm": 0.3569,
+      "roof_sqkm": 0.2049
+    },
+    "61": {
+      "roof_share": 0.5884,
+      "built_sqkm": 0.6767,
+      "roof_sqkm": 0.3982
+    },
+    "70": {
+      "roof_share": 0.6502,
+      "built_sqkm": 0.5864,
+      "roof_sqkm": 0.3813
+    },
+    "67": {
+      "roof_share": 0.6663,
+      "built_sqkm": 0.4062,
+      "roof_sqkm": 0.2706
+    },
+    "68": {
+      "roof_share": 0.6614,
+      "built_sqkm": 0.6124,
+      "roof_sqkm": 0.4051
+    },
+    "63": {
+      "roof_share": 0.6037,
+      "built_sqkm": 0.6683,
+      "roof_sqkm": 0.4034
+    },
+    "x49": {
+      "roof_share": 0.6234,
+      "built_sqkm": 0.6619,
+      "roof_sqkm": 0.4126
+    },
+    "33": {
+      "roof_share": 0.6406,
+      "built_sqkm": 0.4635,
+      "roof_sqkm": 0.2969
+    },
+    "34": {
+      "roof_share": 0.6236,
+      "built_sqkm": 0.479,
+      "roof_sqkm": 0.2987
+    },
+    "69": {
+      "roof_share": 0.676,
+      "built_sqkm": 0.5356,
+      "roof_sqkm": 0.3621
+    },
+    "36": {
+      "roof_share": 0.6008,
+      "built_sqkm": 0.7028,
+      "roof_sqkm": 0.4222
+    },
+    "35": {
+      "roof_share": 0.7062,
+      "built_sqkm": 0.486,
+      "roof_sqkm": 0.3432
+    },
+    "37": {
+      "roof_share": 0.6125,
+      "built_sqkm": 0.7776,
+      "roof_sqkm": 0.4762
+    },
+    "39": {
+      "roof_share": 0.626,
+      "built_sqkm": 0.6079,
+      "roof_sqkm": 0.3806
+    },
+    "38": {
+      "roof_share": 0.6042,
+      "built_sqkm": 0.8491,
+      "roof_sqkm": 0.513
+    },
+    "40": {
+      "roof_share": 0.6573,
+      "built_sqkm": 0.4776,
+      "roof_sqkm": 0.3139
+    },
+    "43": {
+      "roof_share": 0.6915,
+      "built_sqkm": 0.6071,
+      "roof_sqkm": 0.4198
+    },
+    "41": {
+      "roof_share": 0.6615,
+      "built_sqkm": 0.792,
+      "roof_sqkm": 0.5239
+    },
+    "45": {
+      "roof_share": 0.6802,
+      "built_sqkm": 0.7399,
+      "roof_sqkm": 0.5033
+    },
+    "46": {
+      "roof_share": 0.7748,
+      "built_sqkm": 0.304,
+      "roof_sqkm": 0.2355
+    },
+    "47": {
+      "roof_share": 0.62,
+      "built_sqkm": 0.4272,
+      "roof_sqkm": 0.2649
+    },
+    "44": {
+      "roof_share": 0.6047,
+      "built_sqkm": 0.4766,
+      "roof_sqkm": 0.2882
+    },
+    "52": {
+      "roof_share": 0.6075,
+      "built_sqkm": 0.5804,
+      "roof_sqkm": 0.3526
+    },
+    "51": {
+      "roof_share": 0.6544,
+      "built_sqkm": 0.527,
+      "roof_sqkm": 0.3449
+    },
+    "48": {
+      "roof_share": 0.4885,
+      "built_sqkm": 0.6536,
+      "roof_sqkm": 0.3193
+    },
+    "49": {
+      "roof_share": 0.6377,
+      "built_sqkm": 0.5461,
+      "roof_sqkm": 0.3482
+    },
+    "50": {
+      "roof_share": 0.5517,
+      "built_sqkm": 0.5491,
+      "roof_sqkm": 0.3029
+    },
+    "56": {
+      "roof_share": 0.5742,
+      "built_sqkm": 0.2779,
+      "roof_sqkm": 0.1595
+    },
+    "58": {
+      "roof_share": 0.553,
+      "built_sqkm": 0.4962,
+      "roof_sqkm": 0.2744
+    },
+    "55": {
+      "roof_share": 0.5609,
+      "built_sqkm": 0.777,
+      "roof_sqkm": 0.4358
+    },
+    "53": {
+      "roof_share": 0.6026,
+      "built_sqkm": 0.5656,
+      "roof_sqkm": 0.3408
+    },
+    "54": {
+      "roof_share": 0.5592,
+      "built_sqkm": 0.4778,
+      "roof_sqkm": 0.2672
+    },
+    "1": {
+      "roof_share": 0.6726,
+      "built_sqkm": 0.5582,
+      "roof_sqkm": 0.3754
+    },
+    "x76": {
+      "roof_share": 0.567,
+      "built_sqkm": 0.0562,
+      "roof_sqkm": 0.0319
+    }
+  }
+}

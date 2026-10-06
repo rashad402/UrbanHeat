@@ -25,6 +25,12 @@ OUTPUT
     present and falls back to the documented constant when it is absent, so the repository stays
     runnable without this step.
 
+HOW ROOF AREA IS MEASURED
+    From each footprint's own `area_in_meters`, summed per ward. NOT by rasterising footprints to
+    a binary 30 m mask: that counts a whole 900 m2 pixel wherever any building touches it, which
+    overstated Kochi's roof area 3x (65.43 against a true 21.68 km2) and pinned the ratio at 1.0
+    on 72 of 74 wards.
+
 CAVEAT WORTH KEEPING IN THE REPORT
     Open Buildings has lower recall on small informal structures and on dense low-rise fabric,
     both common in Kochi. The measured roof share is therefore a LOWER BOUND, which makes the
@@ -89,27 +95,41 @@ def main():
     print(f"footprints with confidence >= {args.confidence}: "
           f"{buildings.size().getInfo():,}")
 
-    # Rasterising footprints is far cheaper than a per-ward vector intersection, and at 30 m it
-    # matches the resolution everything else in the pipeline works at.
-    roof = (buildings.map(lambda f: f.set("one", 1))
-            .reduceToImage(["one"], ee.Reducer.first())
-            .gt(0).unmask(0)
-            .multiply(ee.Image.pixelArea()).rename("roof_m2"))
+    # Built-up area is a raster quantity, so it is summed per ward from the image.
+    built_stats = built_area.reduceRegions(collection=wards, reducer=ee.Reducer.sum(),
+                                           scale=30).getInfo()
+    built_by_ward = {f["properties"]["ward_id"]: float(f["properties"].get("sum") or 0.0)
+                     for f in built_stats["features"]}
 
-    stack = built_area.addBands(roof)
-    stats = stack.reduceRegions(collection=wards, reducer=ee.Reducer.sum(), scale=30).getInfo()
-
+    # Roof area is a VECTOR quantity and is summed as one, from each footprint's own
+    # area_in_meters. This replaced a 30 m binary rasterisation, which marked a pixel as roof if
+    # any building touched it and then counted the whole 900 m2 pixel: a 60 m2 house became
+    # 900 m2. In Kochi's dense fabric nearly every built pixel is touched by something, so the
+    # city total came out at 65.43 km2 against a true 21.68 km2 (3x), the ratio pinned at 1.0 on
+    # 72 of 74 wards, and the min(..., 1.0) below silently made it look merely saturated rather
+    # than wrong. Per-ward calls are slower than one raster pass, but this runs once.
+    # Wards whose ratio exceeded 1.0 before clamping. More roof than built-up area is physically
+    # impossible, so anything here means a real problem upstream, not a saturated ward.
+    over = []
     out, tot_roof, tot_built = {}, 0.0, 0.0
-    for f in stats["features"]:
-        p = f["properties"]
-        wid = p["ward_id"]
-        built = float(p.get("built_m2") or 0.0)
-        rf = float(p.get("roof_m2") or 0.0)
+    feats = gj["features"]
+    for i, f in enumerate(feats, 1):
+        wid = f["properties"]["ward_id"]
+        geom = ee.Geometry(f["geometry"])
+        # filterBounds keeps any footprint intersecting the ward, so a building straddling a
+        # boundary is counted in both. At ~10 m buildings against ~1 km wards that is negligible.
+        rf = float(buildings.filterBounds(geom).aggregate_sum("area_in_meters").getInfo() or 0.0)
+        built = built_by_ward.get(wid, 0.0)
         tot_roof += rf
         tot_built += built
+        print(f"  [{i:>2}/{len(feats)}] {wid:<6} roof {rf / 1e6:7.4f} km2   "
+              f"built {built / 1e6:7.4f} km2", flush=True)
         if built <= 0:
             continue
-        out[wid] = {"roof_share": round(min(rf / built, 1.0), 4),
+        raw = rf / built
+        if raw > 1.0:
+            over.append((wid, round(raw, 3)))
+        out[wid] = {"roof_share": round(min(raw, 1.0), 4),
                     "built_sqkm": round(built / 1e6, 4),
                     "roof_sqkm": round(rf / 1e6, 4)}
 
@@ -130,6 +150,14 @@ def main():
         print(f"  (the hard-coded guess this replaces was 0.50)")
     else:
         print("No wards had built-up area — check the AOI and ward file.")
+
+    # Loud on purpose. More roof than built-up area is physically impossible, so it means the
+    # measurement is wrong rather than saturated - which is exactly what the silent clamp hid.
+    if over:
+        print(f"\n  WARNING: {len(over)} ward(s) had MORE roof than built-up area before "
+              f"clamping to 1.0.")
+        print(f"  That is physically impossible; the measurement is wrong, not merely saturated.")
+        print(f"  Worst: {sorted(over, key=lambda t: -t[1])[:5]}")
 
 
 if __name__ == "__main__":
