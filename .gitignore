@@ -41,3 +41,6 @@ Thumbs.db
 wandb/
 mlruns/
 *.log
+
+#vibe-wise
+.vibe-wise/
