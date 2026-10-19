@@ -225,16 +225,62 @@
   <!-- ───────────────── control rail ───────────────── -->
   <aside class="rail" aria-label="Scenario controls and results">
 
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Selection</h2>
-        <button class="link-btn" id="clearSel" hidden>Clear</button>
-      </div>
-      <div class="selection" id="selectionBox">
-        <p class="empty">No area selected.<br><span>Click a ward on the map, pick one from the <strong>Wards</strong> list, or draw a <strong>Box</strong> or <strong>Zone</strong>.</span></p>
-      </div>
-    </section>
+    <!-- One tool at a time. The rail used to be seven cards in a single column, so the budget plan
+         sat a full screen below the sliders it depends on. Now each tool is an icon here and its
+         panel opens only when asked for; pressing the open tab again folds the panel away. -->
+    <div class="dock" role="tablist" aria-label="Planner tools">
+      <button class="dock-tab" role="tab" id="tab-wards" data-tab="wards" aria-controls="panel-wards"
+              aria-selected="true" title="Choose wards or see what is selected">
+        <svg class="dock-ico" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 14.2s-4.6-3.9-4.6-7.7a4.6 4.6 0 1 1 9.2 0c0 3.8-4.6 7.7-4.6 7.7Z"/>
+          <circle cx="8" cy="6.5" r="1.7"/>
+        </svg>
+        <span class="dock-label">Wards</span>
+        <span class="dock-badge" id="badgeWards" hidden></span>
+      </button>
+      <button class="dock-tab" role="tab" id="tab-scenario" data-tab="scenario" aria-controls="panel-scenario"
+              aria-selected="false" tabindex="-1" title="Season and the intervention to test">
+        <svg class="dock-ico" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M2 4.5h5.3M11.1 4.5H14M2 11.5h2.5M8.3 11.5H14"/>
+          <circle cx="9.2" cy="4.5" r="1.9"/><circle cx="6.4" cy="11.5" r="1.9"/>
+        </svg>
+        <span class="dock-label">Scenario</span>
+      </button>
+      <button class="dock-tab" role="tab" id="tab-impact" data-tab="impact" aria-controls="panel-impact"
+              aria-selected="false" tabindex="-1" title="Predicted cooling for the selection">
+        <svg class="dock-ico" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M2 4.5l4.2 4.2 2.6-2.6L14 11.3"/><path d="M10.4 11.3H14V7.7"/>
+        </svg>
+        <span class="dock-label">Impact</span>
+        <span class="dock-badge dock-dot" id="badgeImpact" hidden></span>
+      </button>
+      <button class="dock-tab" role="tab" id="tab-priority" data-tab="priority" aria-controls="panel-priority"
+              aria-selected="false" tabindex="-1" title="Rank every ward">
+        <svg class="dock-ico" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M2.5 4h11M2.5 8h7.5M2.5 12h4"/>
+        </svg>
+        <span class="dock-label">Priority</span>
+      </button>
+      <button class="dock-tab" role="tab" id="tab-budget" data-tab="budget" aria-controls="panel-budget"
+              aria-selected="false" tabindex="-1" title="Best wards for a limited budget">
+        <svg class="dock-ico" viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="1.8" y="4" width="12.4" height="8" rx="1.7"/><circle cx="8" cy="8" r="1.9"/>
+        </svg>
+        <span class="dock-label">Budget</span>
+      </button>
+      <button class="dock-tab" role="tab" id="tab-saved" data-tab="saved" aria-controls="panel-saved"
+              aria-selected="false" tabindex="-1" title="Saved scenarios">
+        <svg class="dock-ico" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M4 2.5h8v11L8 10.6 4 13.5v-11Z"/>
+        </svg>
+        <span class="dock-label">Saved</span>
+        <span class="dock-badge" id="badgeSaved" hidden></span>
+      </button>
+    </div>
 
+    <div class="rail-body" id="railBody">
+
+    <div class="tabpanel" id="panel-scenario" role="tabpanel" aria-labelledby="tab-scenario" hidden>
     <section class="panel">
       <div class="panel-head"><h2>Scenario</h2></div>
 
@@ -276,6 +322,9 @@
       </div>
     </section>
 
+    </div>
+
+    <div class="tabpanel" id="panel-impact" role="tabpanel" aria-labelledby="tab-impact" hidden>
     <section class="panel" id="resultsPanel">
       <div class="panel-head">
         <h2>Predicted impact</h2>
@@ -318,6 +367,19 @@
       </div>
     </section>
 
+    </div>
+
+    <div class="tabpanel" id="panel-wards" role="tabpanel" aria-labelledby="tab-wards">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Selection</h2>
+        <button class="link-btn" id="clearSel" hidden>Clear</button>
+      </div>
+      <div class="selection" id="selectionBox">
+        <p class="empty">No area selected.<br><span>Click a ward on the map, pick one from the <strong>Wards</strong> list, or draw a <strong>Box</strong> or <strong>Zone</strong>.</span></p>
+      </div>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <h2>Wards</h2>
@@ -331,6 +393,9 @@
            aria-label="Wards" tabindex="0"></div>
     </section>
 
+    </div>
+
+    <div class="tabpanel" id="panel-priority" role="tabpanel" aria-labelledby="tab-priority" hidden>
     <section class="panel">
       <div class="panel-head">
         <h2>Priority wards</h2>
@@ -349,6 +414,69 @@
       <div class="rank" id="rankList" role="list"></div>
     </section>
 
+    </div>
+
+    <div class="tabpanel" id="panel-budget" role="tabpanel" aria-labelledby="tab-budget" hidden>
+    <section class="panel" id="budgetPanel">
+      <div class="panel-head">
+        <h2>Budget plan</h2>
+      </div>
+      <p class="field-note" style="margin:0 0 12px">
+        Say how much you can treat, and it picks the wards where that cools the city most, for the
+        scenario set above.</p>
+      <div class="segmented segmented-sm" role="radiogroup" aria-label="Budget measured in">
+        <button class="seg is-active" data-bmode="area" role="radio" aria-checked="true"
+                title="A fixed amount of roof or built surface you can treat">Roof area</button>
+        <button class="seg" data-bmode="money" role="radio" aria-checked="false"
+                title="A sum of money and what each m² costs">Money</button>
+      </div>
+      <div class="budget-fields">
+        <label class="num" id="bAreaField"><span>Surface you can treat</span>
+          <input type="number" id="bArea" min="0.01" step="0.1" value="2" inputmode="decimal">
+          <em>km²</em></label>
+        <label class="num" id="bMoneyField" hidden><span>Budget</span>
+          <input type="number" id="bMoney" min="0.01" step="0.5" placeholder="e.g. 5" inputmode="decimal">
+          <em>₹ crore</em></label>
+        <label class="num" id="bCostField" hidden><span>Cost per m²</span>
+          <input type="number" id="bCost" min="1" step="10" placeholder="your estimate" inputmode="decimal">
+          <em>₹ / m²</em></label>
+      </div>
+      <p class="field-note" id="bCostNote" hidden style="margin:-2px 0 10px">
+        The cost per m² is yours to set: it depends on the product and contractor, so none is assumed.</p>
+      <label class="check"><input type="checkbox" id="bWhole">
+        <span>Treat whole wards only</span></label>
+      <button class="primary-btn budget-run" id="bRun">Find the best wards</button>
+
+      <div class="plan" id="bResult" hidden>
+        <p class="plan-scn" id="bScenario"></p>
+        <div class="kpis">
+          <div class="kpi">
+            <span class="kpi-label">Treated</span>
+            <span class="kpi-value small" id="bTreated">—</span>
+            <span class="kpi-sub" id="bTreatedSub"></span>
+          </div>
+          <div class="kpi">
+            <span class="kpi-label" title="Mean ΔT over the whole analysed city, weighted by ward area">City-wide cooling</span>
+            <span class="kpi-value small cool" id="bCity">—</span>
+            <span class="kpi-sub" id="bCitySub"></span>
+          </div>
+        </div>
+        <div class="plan-vs" id="bVs"></div>
+        <div class="breakdown-head plan-head">
+          <span>Ward</span><span>Treated</span><span>Ward ΔT</span>
+        </div>
+        <div class="rank" id="bList" role="list"></div>
+        <div class="plan-actions">
+          <button class="ghost-btn ghost-btn-sm" id="bSelect">Select these wards</button>
+          <button class="ghost-btn ghost-btn-sm" id="bCsv">Download plan (CSV)</button>
+        </div>
+        <p class="field-note" id="bCaveat" style="margin-top:10px"></p>
+      </div>
+    </section>
+
+    </div>
+
+    <div class="tabpanel" id="panel-saved" role="tabpanel" aria-labelledby="tab-saved" hidden>
     <section class="panel" id="scenarioPanel">
       <div class="panel-head">
         <h2>Saved scenarios</h2>
@@ -367,6 +495,9 @@
         <div id="diffRows"></div>
       </div>
     </section>
+    </div>
+
+    </div>
   </aside>
 </main>
 
@@ -376,10 +507,12 @@
 <!-- One-time coach marks: the two-tool model (Select vs Box/Zone) is not self-evident. -->
 <div class="coach" id="coach" hidden>
   <div class="coach-card" role="dialog" aria-modal="true" aria-labelledby="coachTitle">
-    <h3 id="coachTitle">Three things to know</h3>
+    <h3 id="coachTitle">Four things to know</h3>
     <ol class="coach-steps">
       <li><strong>Select</strong> is the default tool — click wards on the map, or use the
-        <em>Wards</em> list in the panel if you prefer the keyboard.</li>
+        <em>Wards</em> tab if you prefer the keyboard.</li>
+      <li>The <strong>icons</strong> beside the map open each tool: Wards, Scenario, Impact,
+        Priority, Budget and Saved. One is open at a time; press it again to fold it away.</li>
       <li><strong>Box</strong> and <strong>Zone</strong> sample a custom area straight from
         Earth Engine. Zone traces an arbitrary shape; tap each corner, then close it.</li>
       <li>The baseline temperature is <strong>measured</strong>. Only the change (ΔT) is

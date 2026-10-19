@@ -65,10 +65,22 @@ Then open **http://localhost:8080** (first start takes ~15 s: model, dataset and
   (counterfactuals are an extrapolation problem). `scripts/run_augmented.py` tests whether that
   trade-off can be removed entirely.
 
+The side panel is a row of icons (Wards, Scenario, Impact, Priority, Budget, Saved), each opening
+its own tool; only one is open at a time and pressing it again folds it away. Tabs carry badges
+(selected count, a dot when a result is waiting, saved count) and work with the arrow keys.
+
 What a planner can do with it: select wards from the map **or** the keyboard-navigable ward list,
 draw a box or an arbitrary **zone**, shade wards by baseline temperature or predicted ΔT, rank all
 wards by severity / cooling / cooling-per-km²-treated, save and name scenarios (persisted in the
 browser), compare two side by side, and export CSV or print a one-page sheet.
+
+**Budget plan** (`POST /api/optimise`, `api/optimiser.py`): give a treatable area in km², or a sum of
+money plus your own cost per m² (never defaulted), and it picks the wards where that cools the city
+most, either any share of a ward or whole wards only. Every plan is scored against two things a
+planner might do instead, spreading the budget evenly and treating the hottest wards first. On the
+Kochi data that is about +30% over spreading evenly but only +1-6% over hottest-first, so the
+useful output is how far down the priority list a given budget reaches. Cooling is taken as
+proportional to the share of a ward treated; heat moving between wards is ignored.
 
 ### Baking the thermal overlay
 

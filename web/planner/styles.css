@@ -467,15 +467,50 @@ input[type=range]::-moz-range-thumb{
 /* ───────────── rail ───────────── */
 /* The rail is no longer a surface of its own: it is a scrolling column of cards on the ground. */
 .rail{
-  background:transparent;
-  overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:14px;
+  background:transparent;min-height:0;overflow:hidden;
+  display:flex;flex-direction:column;gap:12px;
+}
+/* Only the open tool scrolls; the icon bar above it stays put. */
+.rail-body{
+  flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;
   scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent;
-  /* The scrollbar is drawn INSIDE the rail's box, so with no padding the cards ran right up to it
+  /* The scrollbar is drawn INSIDE the box, so with no padding the cards ran right up to it
      and the thumb read as the cards' own right border. padding-right is the visible gap, and
-     scrollbar-gutter keeps the cards the same width whether or not the rail is long enough to
+     scrollbar-gutter keeps the cards the same width whether or not the panel is long enough to
      scroll, so they do not jump 10px when a result panel opens. */
   padding-right:10px;scrollbar-gutter:stable;
 }
+/* One tool at a time. A panel is only in the layout while its tab is open (the [hidden] rule
+   above removes the rest), and each one eases in so a switch reads as a change, not a jump. */
+.tabpanel{display:flex;flex-direction:column;gap:14px;animation:tab-in .26s var(--ease-out)}
+@keyframes tab-in{from{opacity:0;transform:translateY(8px)}}
+
+/* ───────────── tool dock: the icon bar that opens each panel ───────────── */
+.dock{
+  flex:none;display:grid;grid-template-columns:repeat(6,1fr);gap:2px;padding:5px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  /* line the bar up with the cards below, which stop short of the scrollbar gutter */
+  margin-right:10px;
+}
+.dock-tab{
+  position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:9px 0 8px;background:none;border:0;border-radius:calc(var(--radius) - 6px);
+  color:var(--muted);font-family:inherit;cursor:pointer;
+  transition:background-color .18s ease,color .18s ease;
+}
+.dock-tab:hover{background:var(--surface-2);color:var(--fg)}
+.dock-tab[aria-selected=true]{background:var(--accent-soft);color:var(--accent)}
+.dock-ico{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.4;
+  stroke-linecap:round;stroke-linejoin:round}
+.dock-label{font-size:10.5px;font-weight:600;letter-spacing:.01em}
+.dock-badge{
+  position:absolute;top:3px;left:calc(50% + 7px);min-width:15px;height:15px;padding:0 4px;
+  border-radius:var(--pill);background:var(--accent);color:var(--accent-ink);
+  font:600 9.5px/15px var(--font-mono);text-align:center;
+}
+/* results exist: a dot rather than a number, since there is no count to give */
+.dock-dot{min-width:0;width:8px;height:8px;padding:0;top:6px;left:calc(50% + 9px)}
 
 /* Headline result, on the map. Glass on its own elevation like the other map controls, so it
    reads as part of the instrument and not as a card that has wandered out of the rail. It is
@@ -647,6 +682,29 @@ input[type=range]::-moz-range-thumb{
 .rank-dt{color:var(--accent);font-weight:600}
 .rank-empty{color:var(--muted);font-size:12.5px;padding:4px 0}
 
+/* budget plan */
+.budget-fields{display:flex;flex-direction:column;gap:8px;margin:12px 0 10px}
+.num{display:grid;grid-template-columns:1fr 96px 52px;gap:8px;align-items:center;font-size:13px}
+.num span{color:var(--fg-dim);font-weight:500}
+.num input{
+  width:100%;height:34px;background:var(--surface-2);color:var(--fg);
+  border:1px solid var(--line);border-radius:var(--pill);padding:0 12px;
+  font-family:var(--font-mono);font-size:12.5px;text-align:right;
+}
+.num input::placeholder{color:var(--muted);font-family:var(--font-ui);font-size:11.5px}
+.num em{font-style:normal;font-size:11px;color:var(--muted)}
+.check{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--fg-dim);
+  cursor:pointer;margin:2px 0 4px}
+.check input{accent-color:var(--accent);width:15px;height:15px;margin:0}
+.budget-run{width:100%}
+.plan{margin-top:18px}
+.plan-scn{margin:0 0 10px;font-size:11.5px;color:var(--muted)}
+.plan-vs{margin:12px 0 12px;font-size:11.5px;color:var(--muted);line-height:1.55}
+.plan-vs b{color:var(--fg);font-weight:600}
+.plan-head{grid-template-columns:22px 1fr 54px 48px;gap:10px;padding:0 10px 6px}
+.plan-head span:first-child{grid-column:1 / 3}
+.plan-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+
 /* toast */
 .toast{
   position:fixed;left:50%;bottom:34px;transform:translateX(-50%);z-index:80;
@@ -724,7 +782,8 @@ input[type=range]::-moz-range-thumb{
    noise, so they stop and only the state changes remain. */
 @media (prefers-reduced-motion:reduce){
   .spinner{animation-duration:2.4s}
-  .sld-sheen,.sld-halo,.status-dot{animation:none}
+  .sld-sheen,.sld-halo,.status-dot,.tabpanel{animation:none}
+  .dock-tab{transition-duration:.01ms}
   .sld-sheen{opacity:0}
   .act,.readout,.ro-span,.ro-tick,.sld-fill,.sld-halo,.cmp-fill,.rank-row,
   .ghost-btn,.primary-btn,.tool,.seg,.preset,.link-btn{transition-duration:.01ms}
@@ -880,7 +939,11 @@ input[type=range]::-moz-range-thumb{
   body{overflow:auto}
   .shell{grid-template-columns:1fr;height:auto}
   .stage{height:min(62vh,560px)}
-  .rail{max-height:none;overflow:visible;padding-right:0;scrollbar-gutter:auto}
+  .rail{max-height:none;overflow:visible}
+  .rail-body{overflow:visible;padding-right:0;scrollbar-gutter:auto}
+  /* Stacked under the map, the page scrolls instead of the rail, so the icon bar sticks to the top
+     of the screen: switching tool must never mean scrolling back up to find the tabs. */
+  .dock{margin-right:0;position:sticky;top:8px;z-index:30}
   .layers{width:220px}
   .hint{display:none}
   /* Stacked, the map is above the rail and scrolls out of view while the sliders are on screen, so
@@ -949,10 +1012,14 @@ input[type=range]::-moz-range-thumb{
   .toolbar,.layers,.hint,.box-draw,.toast,.ghost-btn,.actions,.link-btn,
   .mapboxgl-ctrl,.presets,.sld,input[type=range],.status-dot,
   .coach,.search,.wardlist,.segmented,.scen-actions,.scen-pick,.scen-del,
-  .select,.legend-inert,.readout,.layers-toggle,.layers-more{display:none!important}
+  .select,.legend-inert,.readout,.layers-toggle,.layers-more,.dock,
+  .budget-fields,.budget-run,.check,.plan-actions{display:none!important}
   .scen-row{grid-template-columns:1fr auto;border:1px solid #ddd}
   .diff{break-inside:avoid}
   .rail{border:0;max-height:none;overflow:visible;display:block;gap:0;padding:0}
+  /* The sheet is every tool's panel, not just the one open on screen. */
+  .rail-body{overflow:visible;padding:0;display:block}
+  .rail .tabpanel,.rail .tabpanel[hidden]{display:block!important;animation:none}
   .panel{break-inside:avoid;border:0;border-bottom:1px solid #ddd;border-radius:0;box-shadow:none}
   .rank{max-height:none;overflow:visible}
   .statusbar{color:#555;border-top:1px solid #ccc}

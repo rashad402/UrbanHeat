@@ -29,7 +29,7 @@
   });
 
   const STORE_KEY = "urbanheat.scenarios.v1";
-  const COACH_KEY = "urbanheat.coachSeen.v1";
+  const COACH_KEY = "urbanheat.coachSeen.v2";
   const MAX_PICK = 2;
   // The thermal raster is Landsat at 30 m. Smoothed when zoomed out (nearest-neighbour there is a
   // wall of blocky speckle); true blocks once a pixel is large enough on screen to be read as one.
@@ -52,6 +52,9 @@
     season: "all",
     rank: [],
     rankBy: "delta",
+    tab: "wards",          // the open tool in the rail (the last one used, while folded away)
+    plan: null,            // last budget plan returned by /api/optimise, plus its scenario label
+    bmode: "area",         // budget measured in "area" (km²) or "money"
     choropleth: "none",
     scenarios: [],
     picked: [],
@@ -957,6 +960,7 @@
 
   function renderSelection() {
     syncScrim();
+    updateBadges();
     const box = $("selectionBox");
     const n = state.selected.size;
     $("clearSel").hidden = !(n || state.bbox || state.poly);
@@ -1133,6 +1137,7 @@
     state.lastSummary = null;
     $("saveScenario").disabled = true;
     syncResultBar(null);
+    updateBadges();
   }
 
   let timer = null;
@@ -1172,6 +1177,7 @@
                           interventions: body().interventions, season: state.season };
     $("saveScenario").disabled = false;
     syncResultBar(s, none);
+    updateBadges();
 
     $("kDelta").textContent = none ? "—" : fmtDT(s.mean_delta_t) + " °C";
     $("kDeltaErr").textContent = none ? ""
@@ -1282,6 +1288,7 @@
   }
 
   function renderScenarios() {
+    updateBadges();
     const list = $("scenarioList");
     if (!state.scenarios.length) {
       list.innerHTML = `<p class="scen-empty">Nothing saved yet. Build a scenario, then
@@ -1580,6 +1587,20 @@
     });
 
     $("rankRefresh").addEventListener("click", loadRank);
+
+    document.querySelectorAll(".seg[data-bmode]").forEach(b => b.addEventListener("click", () => {
+      document.querySelectorAll(".seg[data-bmode]").forEach(x => {
+        x.classList.toggle("is-active", x === b);
+        x.setAttribute("aria-checked", String(x === b));
+      });
+      state.bmode = b.dataset.bmode;
+      const money = state.bmode === "money";
+      $("bAreaField").hidden = money;
+      $("bMoneyField").hidden = $("bCostField").hidden = $("bCostNote").hidden = !money;
+    }));
+    $("bRun").addEventListener("click", runPlan);
+    $("bSelect").addEventListener("click", selectPlanWards);
+    $("bCsv").addEventListener("click", exportPlan);
     $("exportBtn").addEventListener("click", exportCsv);
     $("clearSel").addEventListener("click", clearSelection);
     $("aboutBtn").addEventListener("click", () => $("aboutDlg").showModal());
@@ -1599,6 +1620,7 @@
     });
 
     wireWardKeys();
+    wireTabs();
     armHint();
 
     document.addEventListener("keydown", (ev) => {
@@ -1610,6 +1632,56 @@
         finishPolygon();
       }
     });
+  }
+
+  /* ─────────────────── tool tabs ───────────────────
+   * The rail shows one tool at a time. A tab is an icon in the dock; pressing the open one again
+   * folds the panel away, leaving only the icons. This follows the ARIA tabs pattern: arrow keys
+   * move between tabs (and open them), Home/End jump to the ends, and only one tab is in the Tab
+   * order at a time, so the dock costs one stop for a keyboard user, not six. */
+  const TAB_ORDER = ["wards", "scenario", "impact", "priority", "budget", "saved"];
+
+  function openTab(name) {
+    TAB_ORDER.forEach(t => {
+      const on = t === name;
+      $("tab-" + t).setAttribute("aria-selected", String(on));
+      $("panel-" + t).hidden = !on;
+    });
+    if (name) { state.tab = name; $("railBody").scrollTop = 0; }
+    $("railBody").hidden = !name;
+    TAB_ORDER.forEach(t => { $("tab-" + t).tabIndex = t === state.tab ? 0 : -1; });
+  }
+
+  function wireTabs() {
+    TAB_ORDER.forEach(t => {
+      const btn = $("tab-" + t);
+      btn.addEventListener("click", () =>
+        openTab(btn.getAttribute("aria-selected") === "true" ? null : t));
+      btn.addEventListener("keydown", (ev) => {
+        const i = TAB_ORDER.indexOf(t);
+        const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: TAB_ORDER.length - 1 }[ev.key];
+        if (to === undefined) return;
+        ev.preventDefault();
+        const next = TAB_ORDER[(to + TAB_ORDER.length) % TAB_ORDER.length];
+        openTab(next);
+        $("tab-" + next).focus();
+      });
+    });
+    openTab(state.tab);
+    updateBadges();
+  }
+
+  /* What a tab has to tell you without being opened: how many areas are selected, that a result is
+     waiting, how many scenarios are saved. */
+  function setBadge(id, value) {
+    const el = $(id);
+    el.hidden = !value;
+    el.textContent = value || "";
+  }
+  function updateBadges() {
+    setBadge("badgeWards", state.selected.size + (state.bbox || state.poly ? 1 : 0));
+    $("badgeImpact").hidden = !state.lastSummary;
+    setBadge("badgeSaved", state.scenarios.length);
   }
 
   /* ─────────────────── prioritisation ─────────────────── */
@@ -1669,6 +1741,141 @@
       t_base: "Ranked by today's measured temperature — where the heat problem is worst.",
       efficiency: "Ranked by cooling delivered per km² of surface treated — the budget view.",
     }[state.rankBy];
+  }
+
+  /* ─────────────────── budget plan ───────────────────
+   * "Which wards do I treat with what I can afford?" Answered by /api/optimise, which fills the
+   * budget in order of cooling per treated km². The scenario is whatever is set above; with
+   * nothing set the rank panel already falls back to a 0.50-albedo cool roof, so the plan does
+   * the same and says so, rather than silently planning for an intervention nobody chose. */
+  const SEASON_WORDS = { all: "all seasons", dry: "dry season", premonsoon: "pre-monsoon" };
+
+  function planInterventions() {
+    const albedo = state.iv.albedo || (state.iv.ndvi ? null : 0.5);
+    const ndvi = state.iv.ndvi || null;
+    const parts = [];
+    if (albedo) parts.push(`cool roof, albedo ${albedo.toFixed(2)}`
+      + (state.iv.albedo ? "" : " (default: set a scenario above to change it)"));
+    if (ndvi) parts.push(`added vegetation, NDVI +${ndvi.toFixed(2)}`);
+    return {
+      iv: { albedo_set: albedo, ndvi_delta: ndvi, roof_share: state.iv.roofShare },
+      label: parts.join(" + "),
+    };
+  }
+
+  function readBudget() {
+    const num = (id) => parseFloat($(id).value);
+    if (state.bmode === "area") {
+      const a = num("bArea");
+      if (!(a > 0)) throw new Error("Enter how much surface you can treat, in km².");
+      return { area_sqkm: a };
+    }
+    const crore = num("bMoney"), cost = num("bCost");
+    if (!(crore > 0)) throw new Error("Enter your budget in ₹ crore.");
+    if (!(cost > 0)) throw new Error("Enter the cost per m². It is not assumed for you.");
+    return { money_inr: crore * 1e7, cost_per_m2_inr: cost };
+  }
+
+  const fmtInr = (v) => v >= 1e7 ? `₹${(v / 1e7).toFixed(2)} crore`
+    : v >= 1e5 ? `₹${(v / 1e5).toFixed(1)} lakh` : `₹${Math.round(v).toLocaleString("en-IN")}`;
+  const fmtDT2 = (v) => (v > 0 ? "+" : "") + (Math.abs(v) < 0.005 ? v.toFixed(3) : v.toFixed(2));
+
+  async function runPlan() {
+    let budget;
+    try { budget = readBudget(); } catch (err) { return toast(err.message, true); }
+    const { iv, label } = planInterventions();
+    const btn = $("bRun");
+    btn.disabled = true; btn.textContent = "Planning…";
+    try {
+      const res = await api("/api/optimise", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ interventions: iv, season: state.season, budget,
+                               whole_wards: $("bWhole").checked }),
+      });
+      state.plan = { ...res, label };
+      renderPlan();
+      announce(`Plan found: ${res.summary.n_treated} wards, ${res.summary.treated_sqkm.toFixed(2)} square kilometres treated.`);
+    } catch (err) {
+      toast(String(err.message || err), true);
+    } finally {
+      btn.disabled = false; btn.textContent = "Find the best wards";
+    }
+  }
+
+  function renderPlan() {
+    const p = state.plan;
+    if (!p) return;
+    const s = p.summary, { uniform: even, hottest } = p.comparison;
+    $("bResult").hidden = false;
+    $("bScenario").textContent = `${p.label} · ${SEASON_WORDS[s.season] || s.season}`
+      + (s.whole_wards ? " · whole wards only" : "");
+
+    $("bTreated").textContent = `${s.treated_sqkm.toFixed(2)} km²`;
+    $("bTreatedSub").textContent = `${Math.round((s.share_of_capacity || 0) * 100)}% of ${s.capacity_sqkm.toFixed(1)} km² treatable`
+      + (s.cost_inr ? ` · ${fmtInr(s.cost_inr)}` : "");
+    $("bCity").textContent = s.mean_delta_t_city == null ? "—" : `${fmtDT2(s.mean_delta_t_city)} °C`;
+    $("bCitySub").textContent = `${s.n_treated} of ${s.n_wards} wards`;
+
+    const gain = (c) => c.gain_pct == null ? "—"
+      : Math.abs(c.gain_pct) < 0.5 ? "about the same"
+      : `${c.gain_pct > 0 ? "+" : ""}${c.gain_pct.toFixed(1)}%`;
+    $("bVs").innerHTML = s.budget_exceeds_capacity
+      ? `That budget covers <b>every</b> treatable surface, so every ward is treated and the order does not matter.`
+      : `Same budget <b>spread evenly</b> over all wards: this plan cools <b>${gain(even)}</b> more. `
+        + `Treating the <b>hottest wards first</b>: <b>${gain(hottest)}</b>.`;
+
+    $("bList").innerHTML = p.plan.map((w, i) => `
+      <button class="rank-row${state.selected.has(w.ward_id) ? " is-selected" : ""}"
+              role="listitem" data-id="${w.ward_id}"
+              title="${escapeHtml(w.name)}: ${w.treated_sqkm} km² treated (${Math.round(w.share_treated * 100)}% of what can be treated), baseline ${w.t_base}°C${w.cost_inr ? ", " + fmtInr(w.cost_inr) : ""}">
+        <span class="rank-n">${i + 1}</span>
+        <span class="rank-name">${escapeHtml(w.name)}</span>
+        <span class="rank-base">${Math.round(w.share_treated * 100)}%</span>
+        <span class="rank-dt">${fmtDT2(w.delta_t)}</span>
+      </button>`).join("") || `<p class="rank-empty">Nothing fits in that budget.</p>`;
+    $("bList").querySelectorAll(".rank-row").forEach(b =>
+      b.addEventListener("click", () => toggleWard(b.dataset.id)));
+
+    $("bCaveat").textContent = "Cooling is taken as proportional to the share of a ward treated, and heat "
+      + "moving between neighbouring wards is ignored. Wards with similar cooling per km² are effectively "
+      + "tied, so use this to decide where to start, not to rank wards to the decimal.";
+  }
+
+  function selectPlanWards() {
+    if (!state.plan || !state.plan.plan.length) return toast("Run a plan first.");
+    clearDrawn(); clearWardSelection();
+    for (const w of state.plan.plan) {
+      if (state.wards.get(w.ward_id)?.has_data) { state.selected.add(w.ward_id); setSel(w.ward_id, true); }
+    }
+    renderSelection(); syncRankSelection(); analyze();
+    announce(`${state.selected.size} planned wards selected.`);
+  }
+
+  function exportPlan() {
+    const p = state.plan;
+    if (!p) return toast("Run a plan first.");
+    const s = p.summary, q = (t) => `"${String(t).replace(/"/g, '""')}"`;
+    const head = [
+      "# UrbanHeat budget plan",
+      `# scenario,${q(p.label)}`,
+      `# season,${s.season}`,
+      `# mode,${s.whole_wards ? "whole wards only" : "any share of a ward"}`,
+      `# budget_km2,${s.budget_sqkm}`,
+      `# treated_km2,${s.treated_sqkm}`,
+      `# cost_inr,${s.cost_inr ?? ""}`,
+      `# total_cooling_K_km2,${s.total_cooling_k_km2}`,
+      `# city_mean_delta_T_C,${s.mean_delta_t_city}`,
+      `# roof_share_source,${s.roof_share_source}`,
+      "# NOTE cooling is proportional to the share of a ward treated; heat moving between wards is ignored",
+      "# NOTE delta_t_ward is the change in the whole ward's mean temperature, not just the treated roofs",
+    ];
+    const cols = ["ward_id", "name", "share_treated", "treated_sqkm", "cost_inr",
+                  "delta_t_ward", "cooling_k_km2", "baseline_c"];
+    const rows = p.plan.map(w => [w.ward_id, q(w.name), w.share_treated, w.treated_sqkm,
+                                  w.cost_inr ?? "", w.delta_t, w.cooling_k_km2, w.t_base].join(","));
+    download(new Blob([head.join("\n") + "\n" + cols.join(",") + "\n" + rows.join("\n") + "\n"],
+                      { type: "text/csv" }), "urbanheat-budget-plan.csv");
+    toast("Plan exported.");
   }
 
   async function exportCsv() {
