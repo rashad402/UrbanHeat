@@ -36,6 +36,7 @@ from pydantic import BaseModel
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from api.inference import PinnModel, whatif, built_fraction   # noqa: E402
+from api.optimiser import optimise, score                      # noqa: E402
 from data_engine.build_dataset import load_config, aoi_geometry, build_collection  # noqa: E402
 from data_engine.overlay import PALETTE, build_composite, stretch_range  # noqa: E402
 from models.features import INPUT_COLUMNS                      # noqa: E402
@@ -802,8 +803,30 @@ def rank(req: AnalyzeRequest):
         cooling_per_treated_km2  how much cooling per km2 of roof actually treated
                                  (cost-effectiveness — the one a budget conversation needs)
     """
-    iv = req.interventions
-    frame = _season_frame(req.season)
+    wards, src = _ward_table(req.interventions, req.season)
+    rows = [{"ward_id": w["ward_id"], "name": w["name"], "area_sqkm": w["area_sqkm"],
+             "t_base": round(w["t_base"], 2),
+             "delta_t": round(w["delta_t"], 2),
+             "built_frac": round(w["built_frac"], 2),
+             "roof_share": round(w["roof_share"], 3),
+             "treated_sqkm": round(w["treated_sqkm"], 4),
+             "cooling_k_km2": round(w["cooling_k_km2"], 3),
+             "cooling_per_treated_km2": (round(w["cooling_k_km2"] / w["treated_sqkm"], 2)
+                                         if w["treated_sqkm"] > 1e-9 else None),
+             "npix": w["npix"]} for w in wards]
+    rmse = S["metrics"].get("rmse")
+    return {"items": rows, "season": req.season or "all",
+            "roof_share_source": src,
+            "model_rmse": None if rmse is None or rmse != rmse else round(rmse, 2)}
+
+
+def _ward_table(iv, season):
+    """One UNROUNDED row per ward that has data, for the current scenario.
+
+    Shared by /api/rank (which rounds it for display) and /api/optimise (which must not, because
+    it adds these numbers up). Returns (rows, roof_share_source).
+    """
+    frame = _season_frame(season)
     out = _pixel_response(frame, iv)
     res = pd.DataFrame({"ward_id": frame.ward_id.to_numpy(),
                         "t_base": out["t_base"], "delta_t": out["delta_t"],
@@ -817,23 +840,110 @@ def rank(req: AnalyzeRequest):
     for wid, r in g.iterrows():
         p = geo.get(wid, {})
         area = p.get("area_sqkm") or 0.0
-        treated = float(area * r.coverage)
-        delivered = float(r.delta_t * area)
         rows.append({"ward_id": wid, "name": p.get("ward_name", wid),
                      "area_sqkm": p.get("area_sqkm"),
-                     "t_base": round(float(r.t_base), 2),
-                     "delta_t": round(float(r.delta_t), 2),
-                     "built_frac": round(float(r.built_frac), 2),
-                     "roof_share": round(float(r.roof_share), 3),
-                     "treated_sqkm": round(treated, 4),
-                     "cooling_k_km2": round(delivered, 3),
-                     "cooling_per_treated_km2": (round(delivered / treated, 2)
-                                                 if treated > 1e-9 else None),
+                     "t_base": float(r.t_base), "delta_t": float(r.delta_t),
+                     "built_frac": float(r.built_frac), "roof_share": float(r.roof_share),
+                     "treated_sqkm": float(area * r.coverage),     # the ward's treatable capacity
+                     "cooling_k_km2": float(r.delta_t * area),     # area-weighted, negative = cools
                      "npix": int(counts.loc[wid])})
+    return rows, out["roof_share_source"]
+
+
+class Budget(BaseModel):
+    area_sqkm: float | None = None          # budget as treatable surface, OR
+    money_inr: float | None = None          # budget as money, converted with the unit cost
+    cost_per_m2_inr: float | None = None    # rupees per m2 treated (user-supplied, never assumed)
+
+
+class OptimiseRequest(BaseModel):
+    interventions: Interventions
+    season: str | None = None
+    budget: Budget
+    whole_wards: bool = False               # True: a ward is treated entirely or not at all
+
+
+@app.post("/api/optimise")
+def optimise_plan(req: OptimiseRequest):
+    """Budget plan: which wards to treat, and how much of each, to cool the city most.
+
+    The budget is either a treatable area (km2) or an amount of money plus a unit cost, which is
+    converted to an area. The unit cost is deliberately never defaulted: it is the one input that
+    decides what a rupee buys, it varies by product and contractor, and a made-up default would
+    turn into a made-up headline.
+    """
+    iv, b = req.interventions, req.budget
+    if not (iv.albedo_set or iv.ndvi_delta):
+        raise HTTPException(422, "Choose an intervention (cool-roof albedo or added vegetation) first.")
+    cost = b.cost_per_m2_inr
+    if b.area_sqkm is not None:
+        budget_sqkm = float(b.area_sqkm)
+    elif b.money_inr is not None and cost:
+        budget_sqkm = float(b.money_inr) / (float(cost) * 1e6)          # rupees / (rupees per m2) -> m2 -> km2
+    else:
+        raise HTTPException(422, "Give a budget: a treatable area (km2), or an amount of money "
+                                 "together with the cost per m2.")
+    if not (budget_sqkm > 0) or (cost is not None and cost <= 0):
+        raise HTTPException(422, "The budget and the cost per m2 must be positive.")
+
+    wards, src = _ward_table(iv, req.season)
+    items = [{"ward_id": w["ward_id"], "capacity_sqkm": w["treated_sqkm"],
+              "benefit_k_km2": -w["cooling_k_km2"], "t_base": w["t_base"]} for w in wards]
+    by_id = {w["ward_id"]: w for w in wards}
+    city_area = float(sum(w["area_sqkm"] or 0.0 for w in wards))
+
+    res = optimise(items, budget_sqkm, whole_wards=req.whole_wards)
+    capacity = res["capacity_sqkm"]
+
+    def totals(picks):
+        cooling, area = score(items, picks)
+        return {"cooling_k_km2": round(cooling, 4), "treated_sqkm": round(area, 4),
+                "mean_delta_t_city": round(-cooling / city_area, 4) if city_area else None}
+
+    best = totals(res["picks"])
+    comparison = {}
+    for key, label in (("uniform", "spread evenly"), ("hottest", "hottest wards first")):
+        t = totals(res[key])
+        t["label"] = label
+        t["gain_pct"] = (round(100.0 * (best["cooling_k_km2"] - t["cooling_k_km2"])
+                               / t["cooling_k_km2"], 1) if t["cooling_k_km2"] > 1e-12 else None)
+        comparison[key] = t
+
+    plan = []
+    for wid, frac in res["picks"].items():
+        w = by_id[wid]
+        treated = frac * w["treated_sqkm"]
+        plan.append({"ward_id": wid, "name": w["name"], "area_sqkm": w["area_sqkm"],
+                     "t_base": round(w["t_base"], 2),
+                     "share_treated": round(frac, 4),
+                     "treated_sqkm": round(treated, 4),
+                     "cost_inr": round(treated * 1e6 * cost) if cost else None,
+                     "delta_t": round(frac * w["delta_t"], 3),
+                     "cooling_k_km2": round(-frac * w["cooling_k_km2"], 4),
+                     "cooling_per_treated_km2": round(-w["cooling_k_km2"] / w["treated_sqkm"], 3)})
+    plan.sort(key=lambda p: -p["cooling_k_km2"])
+
     rmse = S["metrics"].get("rmse")
-    return {"items": rows, "season": req.season or "all",
-            "roof_share_source": out["roof_share_source"],
-            "model_rmse": None if rmse is None or rmse != rmse else round(rmse, 2)}
+    return {
+        "plan": plan,
+        "summary": {
+            "budget_sqkm": round(budget_sqkm, 4),
+            "treated_sqkm": best["treated_sqkm"],
+            "capacity_sqkm": round(capacity, 4),
+            "share_of_capacity": round(best["treated_sqkm"] / capacity, 4) if capacity else None,
+            "budget_exceeds_capacity": budget_sqkm >= capacity - 1e-9,
+            "cost_inr": round(best["treated_sqkm"] * 1e6 * cost) if cost else None,
+            "total_cooling_k_km2": best["cooling_k_km2"],
+            "mean_delta_t_city": best["mean_delta_t_city"],
+            "city_area_sqkm": round(city_area, 3),
+            "n_treated": len(plan), "n_wards": len(items),
+            "whole_wards": req.whole_wards,
+            "season": req.season or "all",
+            "roof_share_source": src,
+            "model_rmse": None if rmse is None or rmse != rmse else round(rmse, 2),
+        },
+        "comparison": comparison,
+    }
 
 
 @app.post("/api/export")

@@ -18,6 +18,7 @@ SUITES = [
     ("SEB physics", "test_sebal.py"),
     ("Physics augmentation", "test_synthetic.py"),
     ("Overlay tiling", "test_tiling.py"),
+    ("Budget optimiser", "test_optimiser.py"),
     ("Planner API", "test_api.py"),
 ]
 

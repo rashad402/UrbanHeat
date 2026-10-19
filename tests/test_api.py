@@ -297,6 +297,65 @@ def main():
               all(k in rk["items"][0] for k in
                   ("t_base", "delta_t", "cooling_per_treated_km2")))
 
+        # ───────────── budget optimiser ─────────────
+        def opt(budget, albedo=0.5, ndvi=None, season=None, whole=False):
+            return client.post("/api/optimise", json={
+                "interventions": {"albedo_set": albedo, "ndvi_delta": ndvi, "roof_share": None},
+                "season": season, "budget": budget, "whole_wards": whole})
+
+        capacity = sum(i["treated_sqkm"] for i in rk["items"])
+        small = capacity * 0.2
+        r1 = opt({"area_sqkm": small})
+        j1 = r1.json()
+        s1 = j1["summary"] if r1.status_code == 200 else {}
+        check("/api/optimise answers a roof-area budget", r1.status_code == 200, r1.text[:120])
+        check("optimiser never spends more than the budget, and spends it when it can",
+              abs(s1.get("treated_sqkm", -1) - small) < 1e-3,
+              f"{s1.get('treated_sqkm')} of {small:.4f} km2")
+        check("plan rows add up to the headline cooling",
+              abs(sum(p["cooling_k_km2"] for p in j1["plan"]) - s1["total_cooling_k_km2"]) < 0.01)
+        check("every ward in the plan is predicted to cool",
+              all(p["cooling_k_km2"] > 0 and p["delta_t"] < 0 for p in j1["plan"]))
+        check("the plan beats spreading evenly and treating the hottest wards first",
+              all(c["gain_pct"] is None or c["gain_pct"] >= -1e-6
+                  for c in j1["comparison"].values()),
+              str({k: v["gain_pct"] for k, v in j1["comparison"].items()}))
+
+        big = opt({"area_sqkm": capacity * 2}).json()["summary"]
+        check("a budget above total capacity is flagged and treats everything",
+              big["budget_exceeds_capacity"] is True
+              and abs(big["treated_sqkm"] - capacity) < 0.01, f"{big['treated_sqkm']} vs {capacity:.3f}")
+        check("treating everything matches the sum of the ward ranking",
+              abs(big["total_cooling_k_km2"] + sum(i["cooling_k_km2"] for i in rk["items"]))
+              < 0.05 * abs(big["total_cooling_k_km2"]) + 0.05,
+              f"{big['total_cooling_k_km2']} vs {-sum(i['cooling_k_km2'] for i in rk['items']):.3f}")
+
+        cost_m2 = 300.0
+        rm = opt({"money_inr": small * 1e6 * cost_m2, "cost_per_m2_inr": cost_m2})
+        sm = rm.json()["summary"] if rm.status_code == 200 else {}
+        check("a money budget is converted with the unit cost",
+              abs(sm.get("budget_sqkm", -1) - small) < 1e-3
+              and abs((sm.get("cost_inr") or 0) - small * 1e6 * cost_m2) < 0.01 * small * 1e6 * cost_m2,
+              str(sm.get("cost_inr")))
+
+        rw = opt({"area_sqkm": small}, whole=True).json()
+        check("whole-ward mode treats each chosen ward in full, within budget",
+              all(p["share_treated"] == 1.0 for p in rw["plan"])
+              and rw["summary"]["treated_sqkm"] <= small + 1e-3,
+              f"{rw['summary']['treated_sqkm']} <= {small:.4f}")
+        check("optimiser respects the season filter",
+              opt({"area_sqkm": small}, season="dry").status_code == 200)
+        check("greening-only scenarios can be optimised",
+              opt({"area_sqkm": small}, albedo=None, ndvi=0.2).status_code == 200)
+
+        check("optimiser refuses a request with no intervention",
+              opt({"area_sqkm": small}, albedo=None).status_code == 422)
+        check("optimiser refuses a request with no budget", opt({}).status_code == 422)
+        check("optimiser refuses a money budget with no unit cost (never assumes one)",
+              opt({"money_inr": 1e7}).status_code == 422)
+        check("optimiser refuses a zero or negative budget",
+              opt({"area_sqkm": 0}).status_code == 422 and opt({"area_sqkm": -1}).status_code == 422)
+
         # ───────────── export ─────────────
         ex = client.post("/api/export", json={
             "selection": {"kind": "wards", "ward_ids": ids[:3]},
