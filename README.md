@@ -49,6 +49,16 @@ uvicorn api.planner:app --port 8080
 
 Then open **http://localhost:8080** (first start takes ~15 s: model, dataset and Earth Engine sign-in).
 
+**Windows launcher (no console window).** Double-click `UrbanHeat Planner.lnk`, or
+`launcher/UrbanHeat Planner.vbs`. It starts the server hidden, opens the browser when it is ready,
+and leaves an icon in the system tray (right-click: open, show log, restart, quit). Launching again
+just opens the page; `launcher/Stop UrbanHeat Planner.lnk` (or the tray's Quit) stops it. The
+server's output goes to `data/planner.log`. The `.lnk` files hold absolute paths and are not
+committed, so recreate them on a new machine by making a shortcut to
+`wscript.exe "<project>\launcher\UrbanHeat Planner.vbs"` with `launcher/UrbanHeat.ico` as its icon.
+`run_planner.bat` is the same thing in a visible console, which is handy when debugging. The icon is
+regenerated from the app's logo by `python scripts/make_icon.py`.
+
 - Baseline LST is **measured** Landsat; the PINN supplies the **response** (ΔT) only.
 - Map is **Mapbox GL JS** (satellite basemap) with the Landsat thermal layer as **baked static
   tiles** (`web/planner/tiles/`, see below), so it pans and zooms at any scale and appears

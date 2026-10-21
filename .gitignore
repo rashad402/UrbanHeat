@@ -44,3 +44,6 @@ mlruns/
 
 #vibe-wise
 .vibe-wise/
+
+# Windows shortcuts hold absolute paths, so they are local
+*.lnk
