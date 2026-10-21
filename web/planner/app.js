@@ -1131,8 +1131,7 @@
   }
 
   function resetResults() {
-    ["kDelta", "kArea", "kTemp", "kBudget"].forEach(id => { $(id).textContent = "—"; });
-    ["kDeltaErr", "kAreaSub", "kBest"].forEach(id => { $(id).textContent = ""; });
+    clearImpact();
     $("compare").hidden = true; $("breakdown").hidden = true;
     state.lastSummary = null;
     $("saveScenario").disabled = true;
@@ -1171,6 +1170,79 @@
      next to it rather than folded into a single fake error bar — they measure different things. */
   const fmtDT = (v) => (v > 0 ? "+" : "") + v.toFixed(1);
 
+  /* ─────────────── impact cards ───────────────
+   * One headline (how much cooler), then what it rests on. A figure's unit is a quieter suffix so
+   * the number is what the eye lands on, and nothing here is allowed to wrap: before-and-after
+   * temperature used to be a card of its own, big enough that "37.8 → 37.6" broke over two lines. */
+  const withUnit = (value, unit) => `${value}<span class="unit">${unit}</span>`;
+
+  function clearImpact(hint = "Select an area to see its predicted impact.") {
+    $("heroCard").className = "hero is-idle";
+    $("kDelta").textContent = "—";
+    $("kTemp").textContent = "";
+    $("kHint").textContent = hint;
+    $("spread").hidden = true;
+    $("kArea").textContent = "—";
+    $("kAreaSub").textContent = "";
+    $("kAreaMeter").hidden = true;
+    $("kBudget").textContent = "—";
+    $("kBest").textContent = "";
+    $("kNote").hidden = true;
+  }
+
+  function renderImpact(s, none, multiWard) {
+    if (none) {
+      clearImpact("Choose a cool-roof albedo or added vegetation under Scenario to see the change.");
+      $("kTemp").innerHTML = `<b>${s.mean_t_base.toFixed(1)}</b> °C now`;
+      return;
+    }
+    const m = s.mean_delta_t, warms = m > 0.05;
+    $("heroCard").className = "hero" + (warms ? " is-warm" : "");
+    $("kDelta").innerHTML = withUnit(fmtDT(m), "°C");
+    $("kTemp").innerHTML = `<b>${s.mean_t_base.toFixed(1)}</b><i>→</i><b>${(s.mean_t_base + m).toFixed(1)}</b> °C`;
+    $("kHint").textContent = warms
+      ? "The model predicts a slight warming here, averaged over the whole selection."
+      : "Averaged over the whole selection, treated or not.";
+
+    // Where the cooling lands. The axis always includes zero, so a bar that crosses it is a
+    // visible warning that part of the area warms rather than a number to be noticed.
+    const p10 = s.delta_t_p10, p90 = s.delta_t_p90;
+    if (Number.isFinite(p10) && Number.isFinite(p90)) {
+      const lo0 = Math.min(p10, m, 0), hi0 = Math.max(p90, m, 0);
+      const pad = (hi0 - lo0) * 0.1 || 0.1, lo = lo0 - pad, span = hi0 + pad - lo;
+      const at = (v) => ((v - lo) / span * 100).toFixed(1) + "%";
+      $("spreadRange").style.left = at(p10);
+      $("spreadRange").style.width = ((p90 - p10) / span * 100).toFixed(1) + "%";
+      $("spreadZero").style.left = at(0);
+      $("spreadMean").style.left = at(m);
+      $("kSpread").innerHTML = `${fmtDT(p10)} to ${fmtDT(p90)} °C <span>across the area</span>`;
+      $("spread").hidden = false;
+    } else $("spread").hidden = true;
+
+    const treated = s.treated_area_sqkm, area = s.area_sqkm;
+    $("kArea").innerHTML = treated != null ? withUnit(treated.toFixed(2), "km²") : "—";
+    if (treated != null && area) {
+      const pct = Math.min(100, treated / area * 100);
+      $("kAreaBar").style.width = pct.toFixed(1) + "%";
+      $("kAreaMeter").hidden = false;
+      $("kAreaSub").textContent = `${pct < 1 ? "<1" : Math.round(pct)}% of the ${area.toFixed(2)} km² selected`;
+    } else { $("kAreaMeter").hidden = true; $("kAreaSub").textContent = ""; }
+
+    // cooling_per_treated_km2 is K·km² per km² treated, whose units cancel: it is simply the average
+    // temperature change on the surface that is actually coated or planted.
+    $("kBudget").innerHTML = s.cooling_per_treated_km2 == null ? "—"
+      : withUnit(fmtDT(s.cooling_per_treated_km2), "°C");
+    $("kBest").textContent = multiWard ? `best ward: ${s.best_name} ${fmtDT(s.best_delta_t)} °C` : "";
+
+    // The model's error is on absolute temperature. It is shown because it is the honest published
+    // figure, but as a footnote with its meaning, not as a "±" glued to a number it does not apply to.
+    $("kNote").textContent = s.model_rmse
+      ? `Model accuracy ±${s.model_rmse} K, on temperature itself. The change is a difference of two `
+        + "predictions from the same model, so its own error is smaller than this."
+      : "";
+    $("kNote").hidden = !s.model_rmse;
+  }
+
   function renderResults(res) {
     const s = res.summary, none = s.no_change;
     state.lastSummary = { summary: s, items: res.items, selection: selectionPayload(),
@@ -1179,25 +1251,9 @@
     syncResultBar(s, none);
     updateBadges();
 
-    $("kDelta").textContent = none ? "—" : fmtDT(s.mean_delta_t) + " °C";
-    $("kDeltaErr").textContent = none ? ""
-      : `spread ${fmtDT(s.delta_t_p10)} … ${fmtDT(s.delta_t_p90)}`
-        + (s.model_rmse ? ` · model error ±${s.model_rmse} K` : "");
-
-    $("kArea").textContent = s.treated_area_sqkm != null
-      ? s.treated_area_sqkm.toFixed(2) + " km²" : "—";
-    $("kAreaSub").textContent = s.area_sqkm
-      ? `of ${s.area_sqkm.toFixed(2)} km² selected` : "";
-
-    $("kTemp").textContent = none ? s.mean_t_base.toFixed(1) + " °C"
-      : s.mean_t_base.toFixed(1) + " → " + (s.mean_t_base + s.mean_delta_t).toFixed(1);
-
-    $("kBudget").textContent = (none || s.cooling_per_treated_km2 == null) ? "—"
-      : fmtDT(s.cooling_per_treated_km2) + " K·km²/km²";
-    $("kBest").textContent = none ? "set an intervention"
-      : `best: ${s.best_name} (${fmtDT(s.best_delta_t)})`;
-
     const rows = res.items.filter(i => i.ward_id !== "area");
+    renderImpact(s, none, rows.length > 1);
+
     if (rows.length > 1) {
       $("breakdownRows").innerHTML = rows.map(i => `
         <div class="bd-row"><span class="bd-name" title="${i.name}">${i.name}</span>

@@ -665,6 +665,44 @@ input[type=range]::-moz-range-thumb{
 
 .kpi-sub{display:block;margin-top:3px;font-size:10.5px;color:var(--muted);font-family:var(--font-mono)}
 
+/* predicted impact: the headline card, then what it rests on */
+.impact{display:flex;flex-direction:column;gap:9px}
+.hero{background:var(--accent-soft);border-radius:var(--radius-sm);padding:15px 16px 14px}
+.hero-row{display:flex;align-items:baseline;justify-content:space-between;
+  gap:6px 12px;flex-wrap:wrap;margin-top:4px}
+.hero-value{font-family:var(--font-mono);font-size:34px;font-weight:600;letter-spacing:-.03em;
+  line-height:1.1;color:var(--accent);white-space:nowrap}
+.hero-temps{font-family:var(--font-mono);font-size:13px;color:var(--fg-dim);white-space:nowrap}
+.hero-temps b{color:var(--fg);font-weight:600}
+.hero-temps i{font-style:normal;color:var(--muted);margin:0 5px}
+.hero-hint{margin:6px 0 0;font-size:11.5px;color:var(--muted);line-height:1.45}
+.hero-hint:empty{display:none}
+/* nothing to show yet, or the model says the area warms: say so with colour, not just a sign */
+.hero.is-idle .hero-value{color:var(--muted)}
+.hero.is-warm{background:var(--surface-2)}
+.hero.is-warm .hero-value{color:var(--hot)}
+/* a number's unit is context, not content */
+.unit{font-size:.5em;font-weight:500;color:var(--muted);letter-spacing:0;margin-left:.3em}
+
+/* where in the area the cooling lands: middle 80% of pixels as a bar, the average as a dot, and a
+   tick at zero so it is obvious at a glance whether any part of the area warms */
+.spread{margin-top:15px}
+.spread-track{position:relative;height:10px;border-radius:var(--pill);background:rgba(127,127,127,.2)}
+.spread-range{position:absolute;top:0;bottom:0;min-width:4px;border-radius:var(--pill);
+  background:linear-gradient(90deg,var(--bar-a),var(--bar-b))}
+.spread-zero{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;border-radius:1px;
+  background:var(--fg);opacity:.5}
+.spread-mean{position:absolute;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;
+  background:var(--surface);border:2px solid var(--fg);box-shadow:0 0 0 2px var(--accent-soft)}
+.spread-cap{margin-top:9px;font-family:var(--font-mono);font-size:11px;color:var(--fg-dim)}
+.spread-cap span{font-family:var(--font-ui);color:var(--muted)}
+
+.meter{display:block;height:6px;margin:10px 0 3px;border-radius:var(--pill);overflow:hidden;
+  background:rgba(127,127,127,.2)}
+.meter-fill{display:block;height:100%;width:0;border-radius:var(--pill);background:var(--accent);
+  transition:width .5s var(--ease-out)}
+.impact-note{margin:0;padding:0 2px;font-size:11px;line-height:1.5;color:var(--muted)}
+
 /* priority ranking */
 .rank{display:flex;flex-direction:column;max-height:290px;overflow-y:auto;gap:2px;
   overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent}
@@ -785,7 +823,7 @@ input[type=range]::-moz-range-thumb{
   .sld-sheen,.sld-halo,.status-dot,.tabpanel{animation:none}
   .dock-tab{transition-duration:.01ms}
   .sld-sheen{opacity:0}
-  .act,.readout,.ro-span,.ro-tick,.sld-fill,.sld-halo,.cmp-fill,.rank-row,
+  .act,.readout,.ro-span,.ro-tick,.sld-fill,.sld-halo,.cmp-fill,.meter-fill,.rank-row,
   .ghost-btn,.primary-btn,.tool,.seg,.preset,.link-btn{transition-duration:.01ms}
   .ghost-btn:hover,.primary-btn:hover,.tool:hover,.preset:hover,.rank-row:hover{transform:none}
 }

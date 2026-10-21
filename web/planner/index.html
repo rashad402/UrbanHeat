@@ -332,26 +332,43 @@
         <button class="link-btn" id="exportBtn" hidden>Export CSV</button>
       </div>
 
-      <div class="kpis">
-        <div class="kpi">
-          <span class="kpi-label">Mean cooling</span>
-          <span class="kpi-value cool" id="kDelta">—</span>
-          <span class="kpi-sub" id="kDeltaErr"></span>
+      <!-- Headline first, then what it rests on. The big card answers "how much cooler?" and shows
+           the before and after temperature and how that cooling is spread across the area. The two
+           small cards below answer "how much did we treat?" and "how well does a treated km² do?". -->
+      <div class="impact">
+        <div class="hero is-idle" id="heroCard">
+          <span class="kpi-label">Average surface cooling</span>
+          <div class="hero-row">
+            <span class="hero-value" id="kDelta">—</span>
+            <span class="hero-temps" id="kTemp"></span>
+          </div>
+          <p class="hero-hint" id="kHint">Select an area to see its predicted impact.</p>
+          <div class="spread" id="spread" hidden
+               title="How the change varies across the area: the bar covers the middle 80% of pixels (10th to 90th percentile), the dot is the average, the tick is zero (no change).">
+            <div class="spread-track">
+              <span class="spread-range" id="spreadRange"></span>
+              <span class="spread-zero" id="spreadZero"></span>
+              <span class="spread-mean" id="spreadMean"></span>
+            </div>
+            <div class="spread-cap" id="kSpread"></div>
+          </div>
         </div>
-        <div class="kpi">
-          <span class="kpi-label" title="Built surface actually coated or planted">Surface treated</span>
-          <span class="kpi-value" id="kArea">—</span>
-          <span class="kpi-sub" id="kAreaSub"></span>
+
+        <div class="kpis">
+          <div class="kpi">
+            <span class="kpi-label" title="Built surface actually coated or planted">Surface treated</span>
+            <span class="kpi-value" id="kArea">—</span>
+            <span class="meter" id="kAreaMeter" hidden><span class="meter-fill" id="kAreaBar"></span></span>
+            <span class="kpi-sub" id="kAreaSub"></span>
+          </div>
+          <div class="kpi">
+            <span class="kpi-label" title="Average temperature change on the surface that is actually coated or planted (cooling per km² treated). Compare strategies on this, not on the average over the whole area.">On treated surface</span>
+            <span class="kpi-value" id="kBudget">—</span>
+            <span class="kpi-sub" id="kBest"></span>
+          </div>
         </div>
-        <div class="kpi">
-          <span class="kpi-label">Surface temp</span>
-          <span class="kpi-value" id="kTemp">—</span>
-        </div>
-        <div class="kpi">
-          <span class="kpi-label" title="Cooling delivered per km² of surface treated — compare strategies on this, not on raw ΔT">Per km² treated</span>
-          <span class="kpi-value small" id="kBudget">—</span>
-          <span class="kpi-sub" id="kBest"></span>
-        </div>
+
+        <p class="impact-note" id="kNote" hidden></p>
       </div>
 
       <div class="compare" id="compare" hidden>
