@@ -59,6 +59,38 @@ def make_splits(df, policy="spatial_block", test_fraction=0.2, val_fraction=0.1,
     return df[~(is_test | is_val)], df[is_val], df[is_test]
 
 
+def split_temporal(df, test_from_year=2024, val_fraction=0.1, seed=42):
+    """Train on the past, test on the future: every scene from `test_from_year` on is test.
+
+    Validation is a set of spatial blocks drawn from the TRAINING years only, so early stopping never
+    sees a future scene. Test pixels may sit where training pixels sat in earlier years; that is the
+    point: it asks whether the model holds up on dates it has never seen, in the same city.
+    """
+    years = pd.to_datetime(df["date"]).dt.year
+    past, future = df[years < test_from_year], df[years >= test_from_year]
+    block = (np.floor(past.lon / BLOCK_DEG).astype(int).astype(str) + "_" +
+             np.floor(past.lat / BLOCK_DEG).astype(int).astype(str))
+    blocks = np.array(sorted(block.unique()))
+    np.random.default_rng(seed).shuffle(blocks)
+    val_b = set(blocks[:max(1, int(len(blocks) * val_fraction))])
+    is_val = block.isin(val_b)
+    return past[~is_val], past[is_val], future
+
+
+def split_feature_extrapolation(df, feature="albedo", quantile=0.90, seed=42):
+    """Hold out the top of a feature's range: train never sees it, test is made of it.
+
+    Starts from the standard spatial-block split and removes every pixel with `feature` at or above
+    the `quantile` from train and validation. The extrapolation test set is the held-out pixels that
+    are ALSO in test blocks, so each is unseen in two ways: its location, and its level of `feature`.
+    Returns (train, val, test_extrapolated, test_in_range, cut) so in-range accuracy can be compared.
+    """
+    tr, va, te = make_splits(df, policy="spatial_block", seed=seed)
+    cut = float(df[feature].quantile(quantile))
+    return (tr[tr[feature] < cut], va[va[feature] < cut],
+            te[te[feature] >= cut], te[te[feature] < cut], cut)
+
+
 def fit_scaler(train_df):
     """Fit standardization stats on TRAIN ONLY (features and target)."""
     s = {"x_mean": {}, "x_std": {}}
